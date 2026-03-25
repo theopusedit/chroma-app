@@ -5,7 +5,7 @@ import supabase, {
   saveRecord, getMyRecords, getPublicFeed,
   getMyLists, createList, saveListAssignment,
 } from './supabase.js';
-import { searchMusic, getAlbumTracks, getStreamingLinks, getChart, getNewReleases, getRecommendations, getTrackWithFeatures, getPersonalRecommendations, getArtistInfo, getGenreTracks, getGenreArtists, formatArtist } from './music.js';
+import { searchMusic, getAlbumTracks, getStreamingLinks, getChart, getNewReleases, getRecommendations, getTrackWithFeatures, getPersonalRecommendations, getArtistInfo } from './music.js';
 
 // ── 색상 단축키 ───────────────────────────────────────────────
 const C = CONFIG.colors;
