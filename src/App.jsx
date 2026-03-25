@@ -1,5 +1,11 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { CONFIG, THEME } from "./config";
+import supabase, {
+  signUp, signIn, signOut, getUser, getProfile, updateProfile,
+  getFollowCounts, saveRecord, deleteRecord, getMyRecords,
+  getTrackRecord, getPublicFeed, toggleLike,
+  getMyLists, createList, saveListAssignment, getTrackLists,
+} from './supabase.js';
 import { searchMusic, getAlbumTracks, getKpopChart, getStreamingLinks } from './music.js';
 
 // ── 색상 단축키 ───────────────────────────────────────────────
@@ -96,7 +102,7 @@ function LoginScreen({t, dark, setDark, onLogin, onBack}) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setError("");
     if (!email) { setError("이메일을 입력해주세요"); return; }
     if (mode !== "forgot" && !pw) { setError("비밀번호를 입력해주세요"); return; }
@@ -104,11 +110,21 @@ function LoginScreen({t, dark, setDark, onLogin, onBack}) {
     if (mode === "signup" && pw.length < 6) { setError("비밀번호는 6자 이상이어야 해요"); return; }
 
     setLoading(true);
-    // 실제 Supabase 연결 전까지 데모 로그인
-    setTimeout(() => {
-      setLoading(false);
-      onLogin();
-    }, 1000);
+    try {
+      if (mode === "signup") {
+        await signUp(email, pw, name);
+        onLogin();
+      } else {
+        await signIn(email, pw);
+        onLogin();
+      }
+    } catch(e) {
+      const msg = e.message || "";
+      if (msg.includes("Invalid login")) setError("이메일 또는 비밀번호가 틀렸어요");
+      else if (msg.includes("already registered")) setError("이미 가입된 이메일이에요");
+      else setError("오류가 발생했어요. 다시 시도해주세요");
+    }
+    setLoading(false);
   };
 
   if (mode === "forgot") {
@@ -254,12 +270,8 @@ const HScroll = ({children}) => (
 const TCard = ({item,t,onClick,w=140,recorded=false}) => (
   <div style={{flexShrink:0,width:w,cursor:"pointer"}} onClick={onClick}>
     <div style={{width:w,height:w,borderRadius:14,position:"relative",overflow:"hidden",
-      background:item?.coverUrl?"#111":bg(item.g),
-      backgroundImage:item?.coverUrl?`url(${item.coverUrl})`:"none",
-      backgroundSize:"cover",backgroundPosition:"center",
-      display:"flex",alignItems:"center",justifyContent:"center",
-      fontSize:w*.26,color:"rgba(255,255,255,0.2)"}}>
-      {!item?.coverUrl && "♪"}
+      background:bg(item.g),display:"flex",alignItems:"center",justifyContent:"center",
+      fontSize:w*.26,color:"rgba(255,255,255,0.2)"}}>♪
       {recorded&&<div style={{position:"absolute",top:7,right:7,width:20,height:20,
         borderRadius:"50%",background:C.primary,display:"flex",alignItems:"center",
         justifyContent:"center",fontSize:10,color:"#fff",fontWeight:700}}>✓</div>}
@@ -273,7 +285,7 @@ const TCard = ({item,t,onClick,w=140,recorded=false}) => (
 const RowItem = ({tr,rank,t,onClick,recorded}) => (
   <div style={{display:"flex",alignItems:"center",gap:12,padding:"11px 20px",cursor:"pointer"}} onClick={onClick}>
     {rank!=null&&<span style={{fontSize:15,fontWeight:700,color:rank<3?C.primary:t.tx3,width:22,flexShrink:0,textAlign:"right"}}>{rank+1}</span>}
-    <Cover g={tr.g} img={tr.coverUrl||null} size={46} r={9}/>
+    <Cover g={tr.g} size={46} r={9}/>
     <div style={{flex:1,minWidth:0}}>
       <div style={{fontSize:14,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx}}>{tr.t}</div>
       <div style={{fontSize:12,color:t.tx2,marginTop:1}}>{tr.ar}</div>
@@ -502,14 +514,7 @@ function MoreSheet({t,onClose,track}){
 function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNotif}){
   const [chart,setChart]=useState("global");
   const [era,setEra]=useState("00s");
-  const [chartTracks,setChartTracks]=useState(TRACKS);
   const pick = CONFIG.home.todayPick;
-
-  useEffect(()=>{
-    getKpopChart().then(tracks=>{
-      if(tracks.length>0) setChartTracks(tracks);
-    }).catch(()=>{});
-  },[]);
   return(
     <div>
       <div style={{padding:"52px 20px 20px",display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
@@ -551,7 +556,7 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
               onClick={()=>setChart(id)}>{label}</div>
           ))}
         </div>
-        {chartTracks.slice(0,5).map((tr,i)=><RowItem key={tr.id||i} tr={tr} rank={i} t={t} onClick={()=>onTrack(tr)} recorded={!!records[tr.id]}/>)}
+        {TRACKS.slice(0,5).map((tr,i)=><RowItem key={tr.id} tr={tr} rank={i} t={t} onClick={()=>onTrack(tr)} recorded={!!records[tr.id]}/>)}
       </Sec>
 
       <Sec title="시대별 명곡" t={t}>
@@ -578,9 +583,11 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
 }
 
 // ── FEED ──────────────────────────────────────────────────────
-function FeedScreen({t,onTrack,onUser,onMore}){
+function FeedScreen({t,onTrack,onUser,onMore,feedItems,currentUser}){
   const [liked,setLiked]=useState({});
   const [tab,setTab]=useState("hot");
+  const items = feedItems && feedItems.length > 0 ? feedItems : FEED_ITEMS;
+  const sorted=[...items].sort((a,b)=>tab==="hot"?b.likes-a.likes:0);
   return(
     <div>
       <div style={{padding:"52px 20px 0",display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
@@ -595,7 +602,7 @@ function FeedScreen({t,onTrack,onUser,onMore}){
             onClick={()=>setTab(id)}>{label}</div>
         ))}
       </div>
-      {[...FEED_ITEMS].sort((a,b)=>tab==="hot"?b.likes-a.likes:0).map((r,i)=>(
+      {[...items].sort((a,b)=>tab==="hot"?b.likes-a.likes:0).map((r,i)=>(
         <div key={r.id} style={{padding:"18px 20px",borderBottom:`1px solid ${t.bd}`}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,cursor:"pointer"}} onClick={()=>onUser(r.uid,r.user)}>
             <div style={{width:34,height:34,borderRadius:"50%",background:bg(i),display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,color:"rgba(255,255,255,0.8)",fontWeight:700,flexShrink:0}}>
@@ -634,23 +641,8 @@ function FeedScreen({t,onTrack,onUser,onMore}){
 // ── SEARCH ────────────────────────────────────────────────────
 function SearchScreen({t,onTrack,records}){
   const [q,setQ]=useState("");
-  const [results,setResults]=useState({tracks:[],albums:[]});
-  const [loading,setLoading]=useState(false);
   const genres=[{n:"K-Pop",c:"#2d1b2d"},{n:"인디",c:"#0a2e1b"},{n:"재즈",c:"#0e1b4a"},{n:"팝",c:"#2d1418"},{n:"클래식",c:"#2a1a0a"},{n:"OST",c:"#0a2d3d"},{n:"힙합",c:"#1a2a0a"},{n:"R&B",c:"#2a1a18"}];
-
-  useEffect(()=>{
-    if(!q.trim()){setResults({tracks:[],albums:[]});return;}
-    const timer=setTimeout(async()=>{
-      setLoading(true);
-      try{
-        const data=await searchMusic(q);
-        setResults(data);
-      }catch(e){console.error(e);}
-      setLoading(false);
-    },400);
-    return()=>clearTimeout(timer);
-  },[q]);
-
+  const results=useMemo(()=>q?TRACKS.filter(tr=>tr.t.toLowerCase().includes(q.toLowerCase())||tr.ar.toLowerCase().includes(q.toLowerCase())):[],[q]);
   return(
     <div>
       <div style={{padding:"52px 20px 16px"}}>
@@ -661,46 +653,13 @@ function SearchScreen({t,onTrack,records}){
             placeholder="곡, 앨범, 아티스트 검색" value={q} onChange={e=>setQ(e.target.value)}/>
           {q&&<span style={{position:"absolute",right:14,top:"50%",transform:"translateY(-50%)",color:t.tx3,cursor:"pointer",fontSize:15}} onClick={()=>setQ("")}>✕</span>}
         </div>
+        {q&&<div style={{fontSize:11,color:t.tx3,marginTop:8}}>현재 샘플 데이터 내 검색 중 · Spotify 연동 후 전체 검색 가능</div>}
       </div>
       {q?(
         <div>
-          {loading&&<div style={{padding:"24px 20px",textAlign:"center",color:t.tx3,fontSize:13}}>검색 중...</div>}
-          {!loading&&(
-            <>
-              {results.tracks.length>0&&(
-                <>
-                  <div style={{padding:"12px 20px 4px",fontSize:12,fontWeight:600,color:t.tx3,textTransform:"uppercase",letterSpacing:.1}}>곡</div>
-                  {results.tracks.map((tr,i)=>(
-                    <div key={tr.id} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 20px",cursor:"pointer",borderBottom:`1px solid ${t.bd}`}} onClick={()=>onTrack(tr)}>
-                      <Cover g={i%8} img={tr.coverSmUrl||null} size={46} r={9}/>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:14,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx}}>{tr.t}</div>
-                        <div style={{fontSize:12,color:t.tx2,marginTop:1}}>{tr.ar} · {tr.al}</div>
-                      </div>
-                      {records[tr.id]&&<span style={{fontSize:10,color:C.primary,background:`${C.primary}15`,padding:"2px 7px",borderRadius:10,flexShrink:0,fontWeight:600}}>기록됨</span>}
-                    </div>
-                  ))}
-                </>
-              )}
-              {results.albums.length>0&&(
-                <>
-                  <div style={{padding:"16px 20px 4px",fontSize:12,fontWeight:600,color:t.tx3,textTransform:"uppercase",letterSpacing:.1}}>앨범</div>
-                  {results.albums.map((al,i)=>(
-                    <div key={al.id} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 20px",cursor:"pointer",borderBottom:`1px solid ${t.bd}`}}>
-                      <Cover g={i%8} img={al.coverSmUrl||null} size={46} r={9}/>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:14,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx}}>{al.t}</div>
-                        <div style={{fontSize:12,color:t.tx2,marginTop:1}}>{al.ar} · {al.yr}</div>
-                      </div>
-                    </div>
-                  ))}
-                </>
-              )}
-              {results.tracks.length===0&&results.albums.length===0&&(
-                <div style={{padding:"48px 20px",textAlign:"center",color:t.tx2}}>검색 결과가 없어요</div>
-              )}
-            </>
-          )}
+          <div style={{padding:"0 20px 12px",fontSize:12,color:t.tx3}}>결과 {results.length}개</div>
+          {results.map(tr=><RowItem key={tr.id} tr={tr} t={t} onClick={()=>onTrack(tr)} recorded={!!records[tr.id]}/>)}
+          {results.length===0&&<div style={{padding:"48px 20px",textAlign:"center",color:t.tx2}}>검색 결과가 없어요</div>}
         </div>
       ):(
         <>
@@ -831,7 +790,7 @@ function TrackScreen({t,track,onBack,onRecord,onListModal,onMore,records,trackLi
             <IconBtn icon="···" t={t} onClick={()=>onMore(tr)}/>
           </div>
           <div style={{display:"flex",justifyContent:"center",marginBottom:22}}>
-            <Cover g={tr.g} img={tr.coverUrl||null} size={164} r={18}/>
+            <Cover g={tr.g} size={164} r={18}/>
           </div>
           <div style={{textAlign:"center"}}>
             <div style={{fontWeight:800,fontSize:26,color:"#fff",letterSpacing:-.5,lineHeight:1.2}}>{tr.t}</div>
@@ -886,11 +845,8 @@ function TrackScreen({t,track,onBack,onRecord,onListModal,onMore,records,trackLi
 
       {/* 외부 링크 */}
       <div style={{display:"flex",gap:8,padding:"0 20px",overflowX:"auto",marginBottom:28}}>
-        {getStreamingLinks(tr).map(link=>(
-          <a key={link.name} href={link.url} target="_blank" rel="noopener noreferrer"
-            style={{flexShrink:0,padding:"9px 16px",border:`1px solid ${t.bd}`,borderRadius:20,
-            fontSize:12,color:t.tx2,cursor:"pointer",whiteSpace:"nowrap",background:t.sf,
-            textDecoration:"none",display:"block"}}>▶ {link.name}</a>
+        {CONFIG.streamingLinks.map(s=>(
+          <div key={s} style={{flexShrink:0,padding:"9px 16px",border:`1px solid ${t.bd}`,borderRadius:20,fontSize:12,color:t.tx2,cursor:"pointer",whiteSpace:"nowrap",background:t.sf}}>▶ {s}</div>
         ))}
       </div>
 
@@ -932,16 +888,7 @@ function TrackScreen({t,track,onBack,onRecord,onListModal,onMore,records,trackLi
 // ── ALBUM DETAIL ──────────────────────────────────────────────
 function AlbumScreen({t,album,onBack,onTrack,records}){
   const al=album||ALBUMS[0];
-  const [alTracks,setAlTracks]=useState(TRACKS.filter(tr=>tr.alid===al.id));
-  const [coverGradient]=useState(al.g||0);
-
-  useEffect(()=>{
-    if(al.itunesId){
-      getAlbumTracks(al.itunesId).then(data=>{
-        if(data.trackList?.length>0) setAlTracks(data.trackList);
-      }).catch(()=>{});
-    }
-  },[al.itunesId]);
+  const alTracks=TRACKS.filter(tr=>tr.alid===al.id);
   return(
     <div style={{minHeight:"100vh",background:t.bg,paddingBottom:40}}>
       <div style={{position:"relative",overflow:"hidden",paddingBottom:24}}>
@@ -949,7 +896,7 @@ function AlbumScreen({t,album,onBack,onTrack,records}){
         <div style={{position:"relative",zIndex:1,padding:"0 20px"}}>
           <div style={{paddingTop:52,paddingBottom:20}}><IconBtn icon="‹" t={t} onClick={onBack}/></div>
           <div style={{display:"flex",justifyContent:"center",marginBottom:20}}>
-            <Cover g={coverGradient} img={al.coverUrl||null} size={170} r={18}/>
+            <Cover g={al.g} size={170} r={18}/>
           </div>
           <div style={{textAlign:"center"}}>
             <div style={{fontWeight:800,fontSize:24,color:"#fff",letterSpacing:-.5,lineHeight:1.2}}>{al.t}</div>
@@ -1076,9 +1023,15 @@ function AnnualReport({t,onBack}){
 }
 
 // ── MY PROFILE ────────────────────────────────────────────────
-function MyProfileScreen({t,dark,setDark,onSettings,onSub,records,lists,onTrack,onReport}){
+function MyProfileScreen({t,dark,setDark,onSettings,onSub,records,lists,onTrack,onReport,profile}){
   const [tab,setTab]=useState("records");
-  const rTracks=TRACKS.filter(tr=>records[tr.id]);
+  const rTracks=Object.entries(records).map(([tid,rec])=>({
+    id:tid, t:rec.track_title||"알 수 없는 곡", ar:rec.artist||"",
+    coverUrl:rec.coverUrl||"", g:0, rt:rec.rating||0,
+  }));
+  const displayName = profile?.display_name || profile?.username || "내 프로필";
+  const username = profile?.username || "username";
+  const bio = profile?.bio || "음악을 사랑하는 사람";
   return(
     <div>
       <div style={{padding:"52px 20px 0",borderBottom:`1px solid ${t.bd}`}}>
@@ -1086,8 +1039,8 @@ function MyProfileScreen({t,dark,setDark,onSettings,onSub,records,lists,onTrack,
           <div style={{display:"flex",gap:14,alignItems:"center"}}>
             <div style={{width:68,height:68,borderRadius:"50%",background:bg(1),display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,border:`3px solid ${C.primary}`,flexShrink:0}}>🎵</div>
             <div>
-              <div style={{fontSize:19,fontWeight:800,letterSpacing:-.3,color:t.tx}}>yujin_listens</div>
-              <div style={{fontSize:12,color:t.tx2,marginTop:3,lineHeight:1.5}}>음악이 기억을 만들고<br/>기억이 나를 만든다</div>
+              <div style={{fontSize:19,fontWeight:800,letterSpacing:-.3,color:t.tx}}>{displayName}</div>
+              <div style={{fontSize:12,color:t.tx2,marginTop:3,lineHeight:1.5}}>{bio}</div>
             </div>
           </div>
           <div style={{display:"flex",gap:8,paddingTop:4}}>
@@ -1096,7 +1049,7 @@ function MyProfileScreen({t,dark,setDark,onSettings,onSub,records,lists,onTrack,
           </div>
         </div>
         <div style={{display:"flex",gap:28,marginBottom:16}}>
-          {[[rTracks.length,"기록"],["89","팔로워"],["42","팔로잉"],[lists.length,"리스트"]].map(([n,l])=>(
+          {[[rTracks.length,"기록"],["—","팔로워"],["—","팔로잉"],[lists.length,"리스트"]].map(([n,l])=>(
             <div key={l} style={{textAlign:"center"}}>
               <div style={{fontSize:20,fontWeight:700,color:t.tx}}>{n}</div>
               <div style={{fontSize:10,color:t.tx3,marginTop:1}}>{l}</div>
@@ -1203,7 +1156,8 @@ function UserProfileScreen({t,uid,username,onBack}){
 }
 
 // ── SETTINGS ──────────────────────────────────────────────────
-function SettingsScreen({t,dark,setDark,onBack,onSub,onLanding}){
+function SettingsScreen({t,dark,setDark,onBack,onSub,onLanding,onLogout,profile}){
+  const username = profile?.username || "내 계정";
   return(
     <div style={{minHeight:"100vh",background:t.bg,paddingBottom:40}}>
       <div style={{padding:"52px 20px 20px",display:"flex",alignItems:"center",gap:14,borderBottom:`1px solid ${t.bd}`}}>
@@ -1235,7 +1189,7 @@ function SettingsScreen({t,dark,setDark,onBack,onSub,onLanding}){
           </div>
         </div>
       ))}
-      <div style={{margin:"28px 20px 0",background:t.sf,border:`1px solid ${t.bd}`,color:t.tx2,padding:"13px",borderRadius:12,textAlign:"center",fontSize:14,cursor:"pointer"}}>로그아웃</div>
+      <div style={{margin:"28px 20px 0",background:t.sf,border:`1px solid ${t.bd}`,color:t.tx2,padding:"13px",borderRadius:12,textAlign:"center",fontSize:14,cursor:"pointer"}} onClick={onLogout}>로그아웃</div>
       <div style={{padding:"16px 20px",textAlign:"center",cursor:"pointer"}} onClick={onLanding}>
         <span style={{fontSize:13,color:C.primary}}>{CONFIG.service.name} 서비스 소개 페이지 →</span>
       </div>
@@ -1420,22 +1374,123 @@ export default function App(){
   const [page,setPage]=useState("landing");
   const [nav,setNav]=useState("home");
   const [modal,setModal]=useState(null);
-  const [comingSoon,setComingSoon]=useState(null); // {title, message}
+  const [comingSoon,setComingSoon]=useState(null);
   const [selTrack,setSelTrack]=useState(null);
   const [selAlbum,setSelAlbum]=useState(null);
   const [viewUser,setViewUser]=useState({uid:"",username:""});
-  const [records,setRecords]=useState(INIT_RECORDS);
-  const [lists]=useState(INIT_LISTS);
-  const [trackLists,setTrackLists]=useState(INIT_TLISTS);
   const [showNotif,setShowNotif]=useState(false);
+
+  // ── 실제 유저/데이터 상태 ──
+  const [currentUser,setCurrentUser]=useState(null);
+  const [profile,setProfile]=useState(null);
+  const [records,setRecords]=useState({});       // { trackId: {rating,memo,...} }
+  const [lists,setLists]=useState(INIT_LISTS);
+  const [trackLists,setTrackLists]=useState(INIT_TLISTS);
+  const [feedItems,setFeedItems]=useState(FEED_ITEMS);
+
   const t=THEME(dark);
   const hasNotif=NOTIFS.some(n=>!n.read);
 
-  const goApp=()=>{setPage("app");setNav("home");};
+  // 앱 시작 시 로그인 상태 확인
+  useEffect(()=>{
+    getUser().then(user=>{
+      if(user){
+        setCurrentUser(user);
+        setPage("app");
+        loadUserData(user.id);
+      }
+    });
+    // 공개 피드 불러오기
+    getPublicFeed().then(feed=>{
+      if(feed.length>0) setFeedItems(feed.map(r=>({
+        id:r.id, user:r.profiles?.username||"익명",
+        uid:r.user_id, track:r.track_title, artist:r.artist,
+        g:Math.floor(Math.random()*8), rating:r.rating,
+        memo:r.memo, likes:0, time:"방금 전",
+        coverUrl:r.cover_url,
+      })));
+    }).catch(()=>{});
+  },[]);
+
+  const loadUserData = async (userId) => {
+    try {
+      const [prof, myRecords, myLists] = await Promise.all([
+        getProfile(userId),
+        getMyRecords(userId),
+        getMyLists(userId),
+      ]);
+      if(prof) setProfile(prof);
+      // records를 { trackId: data } 형태로 변환
+      const recMap = {};
+      myRecords.forEach(r=>{
+        recMap[r.track_id]={
+          rating:r.rating, memo:r.memo,
+          date:r.listened_date, isPublic:r.is_public,
+          recordId:r.id, coverUrl:r.cover_url,
+        };
+      });
+      setRecords(recMap);
+      if(myLists.length>0) setLists(myLists);
+    } catch(e){ console.error(e); }
+  };
+
+  const goApp=()=>{
+    setPage("app");setNav("home");
+    if(currentUser) loadUserData(currentUser.id);
+  };
   const goTrack=tr=>{setSelTrack(tr);setPage("track");};
   const goAlbum=al=>{setSelAlbum(al);setPage("album");};
   const goUser=(uid,username)=>{setViewUser({uid,username});setPage("user");};
   const showComingSoon=(title,message)=>setComingSoon({title,message});
+
+  const handleLogin = async () => {
+    const user = await getUser();
+    if(user){
+      setCurrentUser(user);
+      await loadUserData(user.id);
+    }
+    goApp();
+  };
+
+  const handleSaveRecord = async (data) => {
+    if(!selTrack) return;
+    const trackId = String(selTrack.id||selTrack.itunesId||'');
+    if(currentUser){
+      try {
+        await saveRecord(currentUser.id, selTrack, data);
+        await loadUserData(currentUser.id);
+      } catch(e){ console.error(e); }
+    } else {
+      setRecords(p=>({...p,[trackId]:data}));
+    }
+  };
+
+  const handleSaveList = async (trackId, listIds) => {
+    if(currentUser && selTrack){
+      try {
+        await saveListAssignment(currentUser.id, trackId, selTrack, listIds, lists);
+        await loadUserData(currentUser.id);
+      } catch(e){ console.error(e); }
+    }
+    setTrackLists(p=>({...p,[trackId]:listIds}));
+  };
+
+  const handleLogout = async () => {
+    await signOut();
+    setCurrentUser(null);
+    setProfile(null);
+    setRecords({});
+    setPage("landing");
+  };
+
+  const handleCreateList = async (name) => {
+    if(currentUser){
+      try {
+        await createList(currentUser.id, name);
+        await loadUserData(currentUser.id);
+      } catch(e){ console.error(e); }
+    }
+  };
 
   return(
     <>
@@ -1450,16 +1505,16 @@ export default function App(){
       <div style={{maxWidth:390,margin:"0 auto",minHeight:"100vh",background:t.bg,color:t.tx,fontFamily:CONFIG.fonts.family,transition:"background 0.25s,color 0.25s"}}>
 
         {page==="landing"&&<LandingScreen t={t} dark={dark} setDark={setDark} onLogin={()=>setPage("login")} onSignup={()=>setPage("login")}/>}
-        {page==="login"&&<LoginScreen t={t} dark={dark} setDark={setDark} onLogin={goApp} onBack={()=>setPage("landing")}/>}
+        {page==="login"&&<LoginScreen t={t} dark={dark} setDark={setDark} onLogin={handleLogin} onBack={()=>setPage("landing")}/>}
 
         {page==="app"&&(
           <>
             <div style={{paddingBottom:76,animation:"fadeUp 0.2s ease",minHeight:"100vh"}}>
               {nav==="home"&&<HomeScreen t={t} dark={dark} setDark={setDark} onTrack={goTrack} onAlbum={goAlbum} onSub={()=>setPage("sub")} records={records} onNotif={()=>setShowNotif(!showNotif)} hasNotif={hasNotif}/>}
-              {nav==="feed"&&<FeedScreen t={t} onTrack={goTrack} onUser={goUser} onMore={tr=>{setSelTrack(tr);setModal("more");}}/>}
+              {nav==="feed"&&<FeedScreen t={t} onTrack={goTrack} onUser={goUser} onMore={tr=>{setSelTrack(tr);setModal("more");}} feedItems={feedItems} currentUser={currentUser}/>}
               {nav==="search"&&<SearchScreen t={t} onTrack={goTrack} records={records}/>}
               {nav==="archive"&&<ArchiveScreen t={t} onTrack={goTrack} records={records} lists={lists} trackLists={trackLists}/>}
-              {nav==="profile"&&<MyProfileScreen t={t} dark={dark} setDark={setDark} onSettings={()=>setPage("settings")} onSub={()=>setPage("sub")} records={records} lists={lists} onTrack={goTrack} onReport={()=>setPage("report")}/>}
+              {nav==="profile"&&<MyProfileScreen t={t} dark={dark} setDark={setDark} onSettings={()=>setPage("settings")} onSub={()=>setPage("sub")} records={records} lists={lists} onTrack={goTrack} onReport={()=>setPage("report")} profile={profile}/>}
             </div>
             <BottomNav t={t} nav={nav} setNav={setNav}/>
             {showNotif&&<NotifPanel t={t} onClose={()=>setShowNotif(false)}/>}
@@ -1469,12 +1524,12 @@ export default function App(){
         {page==="track"&&<TrackScreen t={t} track={selTrack} onBack={()=>setPage("app")} onRecord={tr=>{setSelTrack(tr);setModal("record");}} onListModal={tr=>{setSelTrack(tr);setModal("list");}} onMore={tr=>{setSelTrack(tr);setModal("more");}} records={records} trackLists={trackLists} lists={lists}/>}
         {page==="album"&&<AlbumScreen t={t} album={selAlbum} onBack={()=>setPage("app")} onTrack={goTrack} records={records}/>}
         {page==="user"&&<UserProfileScreen t={t} uid={viewUser.uid} username={viewUser.username} onBack={()=>setPage("app")}/>}
-        {page==="settings"&&<SettingsScreen t={t} dark={dark} setDark={setDark} onBack={()=>setPage("app")} onSub={()=>setPage("sub")} onLanding={()=>setPage("landing")}/>}
+        {page==="settings"&&<SettingsScreen t={t} dark={dark} setDark={setDark} onBack={()=>setPage("app")} onSub={()=>setPage("sub")} onLanding={()=>setPage("landing")} onLogout={handleLogout} profile={profile}/>}
         {page==="sub"&&<SubScreen t={t} dark={dark} onBack={()=>setPage("app")} onComingSoon={()=>showComingSoon("결제 기능 준비 중", CONFIG.comingSoon.payment)}/>}
-        {page==="report"&&<AnnualReport t={t} onBack={()=>setPage("app")}/>}
+        {page==="report"&&<AnnualReport t={t} onBack={()=>setPage("app")} records={records}/>}
 
-        {modal==="record"&&<RecordModal t={t} track={selTrack} existing={selTrack?records[selTrack.id]:null} onClose={()=>setModal(null)} onSave={data=>{if(selTrack)setRecords(p=>({...p,[selTrack.id]:data}));}}/>}
-        {modal==="list"&&<ListModal t={t} track={selTrack} lists={lists} trackLists={trackLists} onClose={()=>setModal(null)} onSave={(tid,lids)=>setTrackLists(p=>({...p,[tid]:lids}))}/>}
+        {modal==="record"&&<RecordModal t={t} track={selTrack} existing={selTrack?records[String(selTrack.id||selTrack.itunesId||'')]:null} onClose={()=>setModal(null)} onSave={handleSaveRecord}/>}
+        {modal==="list"&&<ListModal t={t} track={selTrack} lists={lists} trackLists={trackLists} onClose={()=>setModal(null)} onSave={handleSaveList} onCreateList={handleCreateList}/>}
         {modal==="more"&&<MoreSheet t={t} track={selTrack} onClose={()=>setModal(null)}/>}
 
         {comingSoon&&<ComingSoonModal t={t} title={comingSoon.title} message={comingSoon.message} onClose={()=>setComingSoon(null)}/>}
