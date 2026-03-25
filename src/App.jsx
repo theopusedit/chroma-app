@@ -540,11 +540,11 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
     ]).then(([top,releases])=>{
       setTrending(top);
       setNewAlbums(releases);
-      setChartTracks(top.slice(0,8));
-      if(top[0]) setTodayPick(top[0]); // 차트 1위 = 오늘의 추천
+      setChartTracks(top.slice(0,8)); // 전체 글로벌 차트
+      if(top[0]) setTodayPick(top[0]);
       setLoading(false);
     }).catch(()=>{
-      searchMusic("kpop").then(d=>{
+      searchMusic("top hits popular").then(d=>{
         setTrending(d.tracks.slice(0,10));
         setNewAlbums(d.albums.slice(0,8));
         setChartTracks(d.tracks.slice(0,8));
@@ -552,20 +552,23 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
         setLoading(false);
       }).catch(()=>setLoading(false));
     });
-    searchMusic("kpop pop hits").then(d=>{
+    searchMusic("hits popular").then(d=>{
       const sorted=[...d.tracks].sort((a,b)=>(b.yr||0)-(a.yr||0));
       setEraTracks(sorted.slice(0,25));
     }).catch(()=>{});
   },[]);
 
   useEffect(()=>{
-    if(chart==="global"||chart==="kr"){
+    if(chart==="global"){
       getTopChart(8).then(d=>setChartTracks(d)).catch(()=>
-        searchMusic(chart==="kr"?"kpop 2024":"top hits 2024").then(d=>setChartTracks(d.tracks.slice(0,8)))
+        searchMusic("top hits popular").then(d=>setChartTracks(d.tracks.slice(0,8)))
       );
-    } else {
-      const q=chart==="pop"?"pop hits 2024 english":"indie folk 2024";
-      searchMusic(q).then(d=>setChartTracks(d.tracks.slice(0,8))).catch(()=>{});
+    } else if(chart==="kr"){
+      searchMusic("kpop").then(d=>setChartTracks(d.tracks.slice(0,8))).catch(()=>{});
+    } else if(chart==="pop"){
+      searchMusic("pop hits taylor swift ed sheeran dua lipa").then(d=>setChartTracks(d.tracks.slice(0,8))).catch(()=>{});
+    } else if(chart==="indie"){
+      searchMusic("indie folk alternative").then(d=>setChartTracks(d.tracks.slice(0,8))).catch(()=>{});
     }
   },[chart]);
 
@@ -747,19 +750,21 @@ function SearchScreen({t,onTrack,records,onSeeAll,onGenre}){
   const [genreCovers,setGenreCovers]=useState({});
 
   const genres=[
-    {n:"K-Pop",c:"#2d1b2d",q:"kpop top hits 2024 aespa newjeans"},
-    {n:"인디",c:"#0a2e1b",q:"korean indie folk ballad 2024"},
-    {n:"재즈",c:"#0e1b4a",q:"jazz classics standards"},
-    {n:"팝",c:"#2d1418",q:"pop hits 2024 english taylor swift"},
+    {n:"K-Pop",c:"#2d1b2d",q:"kpop top hits aespa newjeans ive"},
+    {n:"J-Pop",c:"#1a1a3a",q:"jpop japanese pop yoasobi"},
+    {n:"인디",c:"#0a2e1b",q:"korean indie folk ballad"},
+    {n:"팝",c:"#2d1418",q:"pop hits taylor swift ed sheeran"},
     {n:"클래식",c:"#2a1a0a",q:"classical beethoven mozart piano"},
-    {n:"OST",c:"#0a2d3d",q:"korean drama ost 2024"},
-    {n:"힙합",c:"#1a2a0a",q:"korean hiphop zico 2024"},
-    {n:"R&B",c:"#2a1a18",q:"rnb soul 2024 english"},
+    {n:"OST",c:"#0a2d3d",q:"korean drama ost"},
+    {n:"힙합",c:"#1a2a0a",q:"korean hiphop zico"},
+    {n:"R&B",c:"#2a1a18",q:"rnb soul sza"},
+    {n:"재즈",c:"#0e1b4a",q:"jazz classics miles davis"},
+    {n:"댄스",c:"#2a1a3a",q:"dance electronic edm"},
   ];
 
   useEffect(()=>{
     getTopChart(10).then(d=>setPopularTracks(d)).catch(()=>
-      searchMusic("kpop popular 2024").then(d=>setPopularTracks(d.tracks.slice(0,10))).catch(()=>{})
+      searchMusic("top hits popular").then(d=>setPopularTracks(d.tracks.slice(0,10))).catch(()=>{})
     );
     genres.forEach(g=>{
       searchMusic(g.q).then(d=>{
@@ -851,19 +856,20 @@ function SearchScreen({t,onTrack,records,onSeeAll,onGenre}){
           <Sec title="장르" t={t}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,padding:"0 20px"}}>
               {genres.map(g=>(
-                <div key={g.n} style={{position:"relative",padding:"20px 16px",borderRadius:14,
-                  background:genreCovers[g.n]?`url(${genreCovers[g.n]})`:`${g.c}`,
-                  backgroundSize:"cover",backgroundPosition:"center",
-                  fontSize:15,fontWeight:700,cursor:"pointer",color:"#fff",
-                  overflow:"hidden",minHeight:70,display:"flex",alignItems:"flex-end"}}
+                <div key={g.n} style={{position:"relative",borderRadius:14,
+                  background:g.c,fontSize:15,fontWeight:700,cursor:"pointer",
+                  overflow:"hidden",height:80,display:"flex",alignItems:"flex-end"}}
                   onClick={()=>onGenre(g.n,g.q)}>
-                  {genreCovers[g.n]&&<div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.45)"}}/>}
-                  <span style={{position:"relative",zIndex:1}}>{g.n}</span>
+                  {genreCovers[g.n]&&(
+                    <img src={genreCovers[g.n]} alt="" style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",objectPosition:"center"}}/>
+                  )}
+                  <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.5)"}}/>
+                  <span style={{position:"relative",zIndex:1,padding:"0 14px 14px",color:"#fff",fontSize:14,fontWeight:700}}>{g.n}</span>
                 </div>
               ))}
             </div>
           </Sec>
-          <Sec title="지금 인기" t={t} action="전체보기" onAction={()=>onSeeAll("popular","지금 인기",popularTracks,"kpop popular 2024")}>
+          <Sec title="지금 인기" t={t} action="전체보기" onAction={()=>onSeeAll("popular","지금 인기",popularTracks,"top hits popular")}>
             {popularTracks.length===0?<div style={{padding:"20px",textAlign:"center",color:t.tx3,fontSize:13}}>불러오는 중...</div>
             :popularTracks.slice(0,6).map((tr,i)=>(
               <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 20px",cursor:"pointer",borderBottom:`1px solid ${t.bd}`}} onClick={()=>onTrack(tr)}>
@@ -1731,40 +1737,40 @@ function GenreScreen({t,genreName,genreQuery,onBack,onTrack}){
   const [coverUrl,setCoverUrl]=useState("");
 
   useEffect(()=>{
-    searchMusic(genreQuery+" top hits").then(d=>{
+    searchMusic(genreQuery).then(d=>{
       const loaded=d.tracks.slice(0,50);
       setTracks(loaded);
-      if(loaded[0]?.coverUrl) setCoverUrl(loaded[0].coverUrl);
+      // 첫 번째 로드된 곡의 커버를 헤더로 사용
+      const firstWithCover=loaded.find(tr=>tr.coverUrl);
+      if(firstWithCover) setCoverUrl(firstWithCover.coverUrl);
       setLoading(false);
     }).catch(()=>setLoading(false));
   },[genreQuery]);
 
   return(
     <div style={{minHeight:"100vh",background:t.bg,paddingBottom:40}}>
-      {/* 헤더 */}
-      <div style={{position:"relative",height:220,overflow:"hidden"}}>
-        {coverUrl&&<div style={{position:"absolute",inset:0,backgroundImage:`url(${coverUrl})`,backgroundSize:"cover",backgroundPosition:"center",filter:"brightness(0.45)"}}/>}
-        <div style={{position:"absolute",inset:0,background:"linear-gradient(180deg,transparent 40%,rgba(0,0,0,0.7) 100%)"}}/>
+      <div style={{position:"relative",height:200,overflow:"hidden",flexShrink:0}}>
+        {coverUrl
+          ?<img src={coverUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover",objectPosition:"center"}}/>
+          :<div style={{width:"100%",height:"100%",background:`linear-gradient(145deg,#1a1a2e,#16213e)`}}/>}
+        <div style={{position:"absolute",inset:0,background:"linear-gradient(180deg,rgba(0,0,0,0.2) 0%,rgba(0,0,0,0.65) 100%)"}}/>
         <div style={{position:"absolute",top:52,left:20}}><IconBtn icon="‹" t={{...t,sf:"rgba(255,255,255,0.2)"}} onClick={onBack}/></div>
         <div style={{position:"absolute",bottom:20,left:20,right:20}}>
           <div style={{fontSize:32,fontWeight:800,color:"#fff",letterSpacing:-.8}}>{genreName}</div>
-          <div style={{fontSize:13,color:"rgba(255,255,255,0.6)",marginTop:4}}>{tracks.length}곡</div>
+          <div style={{fontSize:13,color:"rgba(255,255,255,0.6)",marginTop:4}}>{tracks.length > 0 ? `${tracks.length}곡` : ""}</div>
         </div>
       </div>
-
       {loading&&<div style={{padding:"48px 20px",textAlign:"center",color:t.tx3,fontSize:13}}>불러오는 중...</div>}
       {tracks.map((tr,i)=>(
         <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 20px",borderBottom:`1px solid ${t.bd}`,cursor:"pointer"}} onClick={()=>onTrack(tr)}>
-          <div style={{width:50,height:50,borderRadius:10,flexShrink:0,overflow:"hidden",
-            background:tr.coverUrl?"#111":bg(i%8),
-            backgroundImage:tr.coverUrl?`url(${tr.coverUrl})`:"none",
-            backgroundSize:"cover",backgroundPosition:"center",
-            display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"rgba(255,255,255,0.3)"}}>
-            {!tr.coverUrl&&"♪"}
+          <div style={{width:50,height:50,borderRadius:10,flexShrink:0,overflow:"hidden",background:tr.coverUrl?"#111":bg(i%8)}}>
+            {tr.coverUrl
+              ?<img src={tr.coverUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+              :<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,color:"rgba(255,255,255,0.3)"}}>♪</div>}
           </div>
           <div style={{flex:1,minWidth:0}}>
-            <div style={{fontSize:14,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx}}>{tr.t}</div>
-            <div style={{fontSize:12,color:t.tx2,marginTop:2}}>{tr.ar}</div>
+            <div style={{fontSize:14,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx,textAlign:"left"}}>{tr.t}</div>
+            <div style={{fontSize:12,color:t.tx2,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textAlign:"left"}}>{tr.ar}</div>
           </div>
         </div>
       ))}
@@ -1946,23 +1952,29 @@ export default function App(){
       <style>{`
         ${CONFIG.fonts.import}
         *{box-sizing:border-box;margin:0;padding:0;}
-        html{background:${t.bg};}
-        body{font-family:${CONFIG.fonts.family};background:${t.bg};overscroll-behavior:none;}
+        html,body{background:${t.bg};}
+        body{font-family:${CONFIG.fonts.family};}
         ::-webkit-scrollbar{display:none;}
         input,textarea{outline:none;border:none;font-family:${CONFIG.fonts.family};}
         @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-        .app-wrap{width:100%;max-width:480px;min-height:100vh;margin:0 auto;position:relative;overflow-x:hidden;}
-        @media(min-width:520px){.app-wrap{box-shadow:0 0 80px rgba(0,0,0,0.3);}}
+        .app-wrap{width:100%;max-width:480px;min-height:100vh;margin:0 auto;position:relative;}
+        @media(min-width:520px){.app-wrap{box-shadow:0 0 80px rgba(0,0,0,0.15);}}
       `}</style>
       <div className="app-wrap" style={{background:t.bg,color:t.tx,fontFamily:CONFIG.fonts.family,transition:"background 0.25s,color 0.25s"}}>
         {genre&&(
-          <div style={{position:"fixed",inset:0,zIndex:500,background:t.bg,overflowY:"auto",maxWidth:480,margin:"0 auto"}}>
-            <GenreScreen t={t} genreName={genre.name} genreQuery={genre.query} onBack={()=>setGenre(null)} onTrack={tr=>{setGenre(null);goTrack(tr);}}/>
+          <div style={{position:"fixed",inset:0,zIndex:500,background:t.bg,overflowY:"auto",maxWidth:480,margin:"0 auto",display:"flex",flexDirection:"column"}}>
+            <div style={{flex:1,overflowY:"auto",paddingBottom:76}}>
+              <GenreScreen t={t} genreName={genre.name} genreQuery={genre.query} onBack={()=>setGenre(null)} onTrack={tr=>{setGenre(null);goTrack(tr);}}/>
+            </div>
+            <BottomNav t={t} nav={nav} setNav={v=>{setGenre(null);setNav(v);setPage("app");}}/>
           </div>
         )}
         {seeAll&&(
-          <div style={{position:"fixed",inset:0,zIndex:500,background:t.bg,overflowY:"auto",maxWidth:480,margin:"0 auto"}}>
-            <SeeAllScreen t={t} title={seeAll.title} items={seeAll.items} query={seeAll.query} onBack={()=>setSeeAll(null)} onTrack={tr=>{setSeeAll(null);goTrack(tr);}}/>
+          <div style={{position:"fixed",inset:0,zIndex:500,background:t.bg,maxWidth:480,margin:"0 auto",display:"flex",flexDirection:"column"}}>
+            <div style={{flex:1,overflowY:"auto",paddingBottom:76}}>
+              <SeeAllScreen t={t} title={seeAll.title} items={seeAll.items} query={seeAll.query} onBack={()=>setSeeAll(null)} onTrack={tr=>{setSeeAll(null);goTrack(tr);}}/>
+            </div>
+            <BottomNav t={t} nav={nav} setNav={v=>{setSeeAll(null);setNav(v);setPage("app");}}/>
           </div>
         )}        {page==="landing"&&<LandingScreen t={t} dark={dark} setDark={setDark} onLogin={()=>setPage("login")} onSignup={()=>setPage("login")}/>}
         {page==="login"&&<LoginScreen t={t} dark={dark} setDark={setDark} onLogin={handleLogin} onBack={()=>setPage("landing")}/>}
