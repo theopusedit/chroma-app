@@ -3,10 +3,9 @@
 // App.jsx에서 import { searchMusic, getAlbumTracks, getRecommendations } from './music.js'
 
 const ITUNES = "https://itunes.apple.com";
-const CORS = "https://corsproxy.io/?";
 
 async function itunesFetch(url) {
-  const res = await fetch(CORS + encodeURIComponent(url));
+  const res = await fetch(url);
   if (!res.ok) throw new Error("음악 데이터를 불러오지 못했어요");
   return res.json();
 }
