@@ -43,12 +43,8 @@ const INIT_LISTS = [];
 const INIT_RECORDS = {};
 const INIT_TLISTS = {};
 
-const NOTIFS = [
-  {id:1,type:"like",user:"park.music",msg:"님이 회원님의 리뷰에 좋아요를 눌렀어요",sub:"Supermassive Black Hole",time:"5분 전",read:false},
-  {id:2,type:"follow",user:"seo.archive",msg:"님이 팔로우를 시작했어요",sub:"",time:"1시간 전",read:false},
-  {id:3,type:"record",user:"coldwave_j",msg:"님이 새 곡을 기록했어요",sub:"Bohemian Rhapsody — Queen",time:"3시간 전",read:true},
-  {id:4,type:"like",user:"yujin__",msg:"님이 회원님의 리뷰에 좋아요를 눌렀어요",sub:"밤편지",time:"어제",read:true},
-];
+// ── 알림은 Supabase에서 실시간으로 가져옴 (임시 빈 배열)
+const NOTIFS = [];
 
 const FEED_ITEMS = [
   {id:1,user:"coldwave_j",uid:"coldwave",track:"Supermassive Black Hole",artist:"Muse",g:0,rating:5,memo:"트와일라잇 배구씬에서 처음 들었는데 그 이후로 인생 곡이 됨",likes:892,time:"2시간 전"},
@@ -245,34 +241,32 @@ const Stars = ({n=4,s=11}) => (
 );
 
 const Sec = ({title,t,children,action,onAction}) => (
-  <div style={{marginBottom:36}}>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0 20px",marginBottom:14}}>
-      <span style={{fontSize:20,fontWeight:700,letterSpacing:-.4,color:t.tx}}>{title}</span>
-      {action&&<span style={{fontSize:14,color:t.ac,cursor:"pointer",fontWeight:500}} onClick={onAction}>{action}</span>}
+  <div style={{marginBottom:32}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0 20px",marginBottom:12}}>
+      <span style={{fontSize:18,fontWeight:700,letterSpacing:-.4,color:t.tx}}>{title}</span>
+      {action&&<span style={{fontSize:13,color:C.primary,cursor:"pointer",fontWeight:600}} onClick={onAction}>{action}</span>}
     </div>
     {children}
   </div>
 );
 
 const HScroll = ({children}) => (
-  <div style={{display:"flex",gap:14,padding:"0 20px",overflowX:"auto",scrollbarWidth:"none"}}>{children}</div>
+  <div style={{display:"flex",gap:12,padding:"0 20px 4px",overflowX:"auto",scrollbarWidth:"none"}}>{children}</div>
 );
 
 const TCard = ({item,t,onClick,w=140,recorded=false}) => (
   <div style={{flexShrink:0,width:w,cursor:"pointer"}} onClick={onClick}>
     <div style={{width:w,height:w,borderRadius:14,position:"relative",overflow:"hidden",
-      background:item?.coverUrl?"#111":bg((item?.g||0)),
-      backgroundImage:item?.coverUrl?`url(${item.coverUrl})`:"none",
-      backgroundSize:"cover",backgroundPosition:"center",
-      display:"flex",alignItems:"center",justifyContent:"center",
-      fontSize:w*.26,color:"rgba(255,255,255,0.2)"}}>
-      {!item?.coverUrl&&"♪"}
+      background:item?.coverUrl?"#111":bg((item?.g||0))}}>
+      {item?.coverUrl
+        ?<img src={item.coverUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+        :<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:w*.26,color:"rgba(255,255,255,0.2)"}}>♪</div>}
       {recorded&&<div style={{position:"absolute",top:7,right:7,width:20,height:20,
         borderRadius:"50%",background:C.primary,display:"flex",alignItems:"center",
         justifyContent:"center",fontSize:10,color:"#fff",fontWeight:700}}>✓</div>}
     </div>
     <div style={{marginTop:8,fontSize:13,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx,textAlign:"left"}}>{item?.t||""}</div>
-    <div style={{fontSize:12,color:t.tx2,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textAlign:"left"}}>{item?.ar||""}</div>
+    <div style={{fontSize:11,color:t.tx2,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textAlign:"left"}}>{item?.ar||""}</div>
   </div>
 );
 
@@ -442,12 +436,17 @@ function NotifPanel({t,onClose}){
         onClick={e=>e.stopPropagation()}>
         <div style={{padding:"16px 20px",borderBottom:`1px solid ${t.bd}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <span style={{fontSize:17,fontWeight:700,color:t.tx}}>알림</span>
-          <span style={{fontSize:13,color:C.primary,cursor:"pointer"}}>전체 읽음</span>
+          <span style={{fontSize:13,color:t.tx3,cursor:"pointer"}} onClick={onClose}>닫기</span>
         </div>
-        {NOTIFS.map(n=>(
+        {NOTIFS.length===0?(
+          <div style={{padding:"40px 20px",textAlign:"center",color:t.tx3,fontSize:14}}>
+            아직 알림이 없어요<br/>
+            <span style={{fontSize:12,marginTop:6,display:"block"}}>활동이 생기면 여기 나타나요</span>
+          </div>
+        ):NOTIFS.map(n=>(
           <div key={n.id} style={{display:"flex",gap:12,padding:"14px 20px",
             background:n.read?"transparent":`${C.primary}08`,borderBottom:`1px solid ${t.bd}`}}>
-            <div style={{width:38,height:38,borderRadius:"50%",background:n.read?t.sf2:`${C.primary}20`,
+            <div style={{width:38,height:38,borderRadius:"50%",background:`${C.primary}20`,
               display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0,color:C.primary}}>
               {icons[n.type]}
             </div>
@@ -525,9 +524,12 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
   const chartLabels={"us":"🌍 글로벌","kr":"🇰🇷 한국","jp":"🇯🇵 일본"};
 
   const eraQueries={
-    "70s":"year:1970-1979","80s":"year:1980-1989",
-    "90s":"year:1990-1999","00s":"year:2000-2009",
-    "10s":"year:2010-2019","20s":"year:2020-2025",
+    "70s":"classic rock 1970s led zeppelin fleetwood mac",
+    "80s":"80s pop michael jackson madonna prince",
+    "90s":"90s pop nirvana spice girls backstreet boys",
+    "00s":"2000s pop beyonce eminem linkin park",
+    "10s":"2010s pop adele ed sheeran bruno mars",
+    "20s":"2020s billie eilish olivia rodrigo dua lipa",
   };
 
   useEffect(()=>{
@@ -562,6 +564,14 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
       setEraTracks(sorted.slice(0,25));
     }).catch(()=>{});
   },[era]);
+
+  // 기본 시대별 (20s)
+  useEffect(()=>{
+    searchMusic(eraQueries["20s"],"US").then(d=>{
+      const sorted=[...d.tracks].sort((a,b)=>(b.popularity||0)-(a.popularity||0));
+      setEraTracks(sorted.slice(0,25));
+    }).catch(()=>{});
+  },[]);
 
   // 개인 맞춤 추천
   useEffect(()=>{
@@ -1256,10 +1266,10 @@ function AlbumScreen({t,album,onBack,onTrack,records}){
           <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:`1px solid ${t.bd}`,cursor:"pointer"}} onClick={()=>onTrack(tr)}>
             <span style={{fontSize:14,color:t.tx3,width:22,textAlign:"right",flexShrink:0}}>{i+1}</span>
             <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:14,fontWeight:500,color:t.tx,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{tr.t}</div>
-              <div style={{fontSize:12,color:t.tx2,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{tr.ar||al.ar}</div>
+              <div style={{fontSize:14,fontWeight:500,color:t.tx,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textAlign:"left"}}>{tr.t}</div>
+              <div style={{fontSize:12,color:t.tx2,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textAlign:"left"}}>{tr.ar||al.ar}</div>
             </div>
-            {records[String(tr.id||tr.itunesId)]&&<span style={{fontSize:11,color:C.primary,fontWeight:700,flexShrink:0}}>✓</span>}
+            {records[String(tr.id||tr.spotifyId)]&&<span style={{fontSize:11,color:C.primary,fontWeight:700,flexShrink:0}}>✓</span>}
           </div>
         ))}
         {!loadingTracks&&alTracks.length===0&&(
@@ -1846,6 +1856,19 @@ function ListModal({t,track,lists,trackLists,onClose,onSave}){
 
 // ── 장르 상세 페이지 (Apple Music 스타일) ─────────────────────
 // ── 장르 상세 (홈처럼 구성: 배너 + 차트 + 추천 아티스트) ────
+const GENRE_SEARCH = {
+  kpop:    { q:"kpop aespa newjeans ive stayc",      market:"KR" },
+  jpop:    { q:"yoasobi official hige king gnu",     market:"JP" },
+  pop:     { q:"pop hits taylor swift ed sheeran",   market:"US" },
+  indie:   { q:"indie pop phoebe bridgers sufjan",   market:"US" },
+  hiphop:  { q:"hip hop rap drake kendrick lamar",   market:"US" },
+  rnb:     { q:"rnb soul sza beyonce frank ocean",   market:"US" },
+  jazz:    { q:"jazz miles davis john coltrane",     market:"US" },
+  dance:   { q:"dance electronic edm calvin harris", market:"US" },
+  ost:     { q:"movie soundtrack hans zimmer ennio", market:"US" },
+  classic: { q:"classical beethoven mozart chopin",  market:"US" },
+};
+
 function GenreScreen({t,genreName,genreKey,onBack,onTrack,onArtist}){
   const [tracks,setTracks]=useState([]);
   const [artists,setArtists]=useState([]);
@@ -1854,13 +1877,28 @@ function GenreScreen({t,genreName,genreKey,onBack,onTrack,onArtist}){
 
   useEffect(()=>{
     setLoading(true);
+    const cfg=GENRE_SEARCH[genreKey]||{q:genreKey,market:"US"};
     Promise.all([
-      getGenreTracks(genreKey, 25),
-      getGenreArtists(genreKey, 6),
-    ]).then(([trs,ars])=>{
-      setTracks(trs);
-      setArtists(ars);
-      if(trs[0]) setTopTrack(trs[0]);
+      searchMusic(cfg.q, cfg.market),
+      searchMusic(cfg.q+" popular", cfg.market),
+    ]).then(([r1,r2])=>{
+      const seen=new Set();
+      const merged=[];
+      [...(r1.tracks||[]),...(r2.tracks||[])].forEach(tr=>{
+        const key=`${tr.t}-${tr.ar}`;
+        if(!seen.has(key)){seen.add(key);merged.push(tr);}
+      });
+      const sorted=merged.sort((a,b)=>(b.popularity||0)-(a.popularity||0));
+      setTracks(sorted.slice(0,25));
+      if(sorted[0]) setTopTrack(sorted[0]);
+      // 아티스트 추출 (중복 제거)
+      const arMap=new Map();
+      merged.forEach(tr=>{
+        if(tr.ar&&!arMap.has(tr.ar)){
+          arMap.set(tr.ar,{id:tr.spotifyId||tr.id,spotifyId:tr.spotifyId,name:tr.ar,coverUrl:tr.coverUrl||""});
+        }
+      });
+      setArtists(Array.from(arMap.values()).slice(0,6));
       setLoading(false);
     }).catch(()=>setLoading(false));
   },[genreKey]);
@@ -2223,7 +2261,11 @@ export default function App(){
               <GenreScreen t={t} genreName={genre.name} genreKey={genre.key} onBack={()=>setGenre(null)} onTrack={tr=>{setGenre(null);goTrack(tr);}} onArtist={ar=>{setGenre(null);goArtist(ar);}}/>
             </div>
             <div style={{position:"absolute",bottom:0,left:0,right:0,zIndex:600}}>
-              <BottomNav t={t} nav={nav} setNav={v=>{setGenre(null);setNav(v);setPage("app");}}/>
+              <BottomNav t={t} nav={nav} setNav={v=>{
+                setGenre(null);
+                if(v===nav){setPage("app");}
+                else{setNav(v);setPage("app");}
+              }}/>
             </div>
           </div>
         )}
@@ -2233,7 +2275,11 @@ export default function App(){
               <SeeAllScreen t={t} title={seeAll.title} items={seeAll.items} query={seeAll.query} onBack={()=>setSeeAll(null)} onTrack={tr=>{setSeeAll(null);goTrack(tr);}}/>
             </div>
             <div style={{position:"absolute",bottom:0,left:0,right:0,zIndex:600}}>
-              <BottomNav t={t} nav={nav} setNav={v=>{setSeeAll(null);setNav(v);setPage("app");}}/>
+              <BottomNav t={t} nav={nav} setNav={v=>{
+                setSeeAll(null);
+                if(v===nav){setPage("app");}
+                else{setNav(v);setPage("app");}
+              }}/>
             </div>
           </div>
         )}
