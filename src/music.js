@@ -1,43 +1,39 @@
 // src/music.js
-const ITUNES = "https://itunes.apple.com";
-const RSS = "https://rss.applemarketingtools.com/api/v2/kr/music";
+// 모든 API 호출은 /api/music 프록시를 통해 서버에서 실행 → CORS 없음
 
-async function apiFetch(url) {
+const PROXY = "/api/music";
+
+async function call(params) {
+  const url = PROXY + "?" + new URLSearchParams(params).toString();
   const res = await fetch(url);
-  if (!res.ok) throw new Error("데이터 로드 실패");
+  if (!res.ok) throw new Error("API 오류");
   return res.json();
 }
 
-// ── 실시간 차트 (Apple Music 한국 인기순) ─────────────────────
-export async function getTopChart(limit = 25) {
-  try {
-    const data = await apiFetch(`${RSS}/most-played/${limit}/songs.json`);
-    const results = (data.feed?.results || []).map(formatRssTrack);
-    if (results.length > 0) return results;
-  } catch(e) {}
-  // fallback: iTunes 검색 (연도 없이 — 최신순으로 나옴)
-  const data = await apiFetch(`${ITUNES}/search?term=kpop&country=KR&media=music&entity=song&limit=${limit}&sort=recent`);
-  return (data.results || []).map(formatTrack);
+// ── 글로벌 실시간 차트 (Apple Music RSS) ─────────────────────
+// country: us=글로벌, kr=한국, gb=영국, jp=일본, au=호주
+export async function getTopChart(limit = 25, country = "us") {
+  const data = await call({ type: "chart", country, limit });
+  return (data.feed?.results || []).map(formatRssTrack);
 }
 
-// ── 최신 발매 앨범 (한국 신보) ────────────────────────────────
-export async function getNewReleases(limit = 10) {
-  try {
-    const data = await apiFetch(`${RSS}/new-releases/${limit}/albums.json`);
-    const results = (data.feed?.results || []).map(formatRssAlbum);
-    if (results.length > 0) return results;
-  } catch(e) {}
-  // fallback
-  const data = await apiFetch(`${ITUNES}/search?term=kpop&country=KR&media=music&entity=album&limit=${limit}&sort=recent`);
-  return (data.results || []).map(formatAlbum);
+// ── 한국 차트 ─────────────────────────────────────────────────
+export async function getKrChart(limit = 25) {
+  const data = await call({ type: "chart", country: "kr", limit });
+  return (data.feed?.results || []).map(formatRssTrack);
+}
+
+// ── 최신 앨범 (발매일 기준 최신) ─────────────────────────────
+export async function getNewReleases(limit = 10, country = "us") {
+  const data = await call({ type: "new-releases", country, limit });
+  return (data.feed?.results || []).map(formatRssAlbum);
 }
 
 // ── 검색 ──────────────────────────────────────────────────────
-export async function searchMusic(query) {
-  const q = encodeURIComponent(query);
+export async function searchMusic(query, country = "KR") {
   const [trackData, albumData] = await Promise.all([
-    apiFetch(`${ITUNES}/search?term=${q}&country=KR&media=music&entity=song&limit=15`),
-    apiFetch(`${ITUNES}/search?term=${q}&country=KR&media=music&entity=album&limit=8`),
+    call({ type: "search", query, country, entity: "song", limit: 15 }),
+    call({ type: "search", query, country, entity: "album", limit: 8 }),
   ]);
   return {
     tracks: (trackData.results || []).map(formatTrack),
@@ -47,7 +43,7 @@ export async function searchMusic(query) {
 
 // ── 앨범 수록곡 ───────────────────────────────────────────────
 export async function getAlbumTracks(collectionId) {
-  const data = await apiFetch(`${ITUNES}/lookup?id=${collectionId}&entity=song&country=KR`);
+  const data = await call({ type: "lookup", query: collectionId });
   const items = data.results || [];
   const albumInfo = items.find(i => i.wrapperType === "collection");
   const tracks = items
@@ -57,7 +53,7 @@ export async function getAlbumTracks(collectionId) {
   return { ...(albumInfo ? formatAlbum(albumInfo) : {}), trackList: tracks };
 }
 
-// ── 스트리밍 외부 링크 ────────────────────────────────────────
+// ── 스트리밍 링크 ─────────────────────────────────────────────
 export function getStreamingLinks(track) {
   const q = encodeURIComponent(`${track.t} ${track.ar}`);
   return [
@@ -76,8 +72,8 @@ function formatRssTrack(item) {
     t: item.name || "",
     ar: item.artistName || "",
     al: item.albumName || "",
-    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0,4)) : null,
-    coverUrl: item.artworkUrl100?.replace("100x100bb","400x400bb") || "",
+    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0, 4)) : null,
+    coverUrl: item.artworkUrl100?.replace("100x100bb", "600x600bb") || "",
     coverSmUrl: item.artworkUrl100 || "",
     itunesUrl: item.url || "",
     dur: "", genre: item.genreName || "",
@@ -92,8 +88,8 @@ function formatRssAlbum(item) {
     itunesId: item.id,
     t: item.name || "",
     ar: item.artistName || "",
-    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0,4)) : null,
-    coverUrl: item.artworkUrl100?.replace("100x100bb","400x400bb") || "",
+    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0, 4)) : null,
+    coverUrl: item.artworkUrl100?.replace("100x100bb", "600x600bb") || "",
     coverSmUrl: item.artworkUrl100 || "",
     itunesUrl: item.url || "",
     altype: "앨범", label: "",
@@ -113,8 +109,8 @@ export function formatTrack(item) {
     t: item.trackName || item.collectionName || "",
     ar: item.artistName || "",
     al: item.collectionName || "",
-    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0,4)) : null,
-    coverUrl: item.artworkUrl100?.replace("100x100bb","400x400bb") || "",
+    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0, 4)) : null,
+    coverUrl: item.artworkUrl100?.replace("100x100bb", "600x600bb") || "",
     coverSmUrl: item.artworkUrl100 || "",
     itunesUrl: item.trackViewUrl || item.collectionViewUrl || "",
     dur: msToTime(item.trackTimeMillis || 0),
@@ -133,8 +129,8 @@ export function formatAlbum(item) {
     itunesId: item.collectionId,
     t: item.collectionName || "",
     ar: item.artistName || "",
-    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0,4)) : null,
-    coverUrl: item.artworkUrl100?.replace("100x100bb","400x400bb") || "",
+    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0, 4)) : null,
+    coverUrl: item.artworkUrl100?.replace("100x100bb", "600x600bb") || "",
     coverSmUrl: item.artworkUrl100 || "",
     itunesUrl: item.collectionViewUrl || "",
     altype: item.collectionType || "앨범",
@@ -149,6 +145,6 @@ export function formatAlbum(item) {
 function msToTime(ms) {
   if (!ms) return "";
   const min = Math.floor(ms / 60000);
-  const sec = Math.floor((ms % 60000) / 1000).toString().padStart(2,"0");
+  const sec = Math.floor((ms % 60000) / 1000).toString().padStart(2, "0");
   return `${min}:${sec}`;
 }
