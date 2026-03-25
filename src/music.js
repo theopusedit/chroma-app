@@ -1,5 +1,6 @@
 // src/music.js
-const BASE = "https://itunes.apple.com";
+const ITUNES = "https://itunes.apple.com";
+const RSS = "https://rss.applemarketingtools.com/api/v2/kr/music";
 
 async function apiFetch(url) {
   const res = await fetch(url);
@@ -7,11 +8,31 @@ async function apiFetch(url) {
   return res.json();
 }
 
+// ── 실시간 차트 (Apple Music 한국 인기순) ─────────────────────
+export async function getTopChart(limit = 25) {
+  const data = await apiFetch(`${RSS}/most-played/${limit}/songs.json`);
+  return (data.feed?.results || []).map(formatRssTrack);
+}
+
+// ── 최신 발매 앨범 (한국 신보) ────────────────────────────────
+export async function getNewReleases(limit = 10) {
+  const data = await apiFetch(`${RSS}/new-releases/${limit}/albums.json`);
+  return (data.feed?.results || []).map(formatRssAlbum);
+}
+
+// ── 장르별 차트 ────────────────────────────────────────────────
+// genreId: 6004=Pop, 6005=Rock, 6015=R&B, 6012=Electronic
+export async function getGenreChart(genreId, limit = 25) {
+  const data = await apiFetch(`${RSS}/most-played/${limit}/songs.json?genre=${genreId}`);
+  return (data.feed?.results || []).map(formatRssTrack);
+}
+
+// ── 검색 ──────────────────────────────────────────────────────
 export async function searchMusic(query) {
   const q = encodeURIComponent(query);
   const [trackData, albumData] = await Promise.all([
-    apiFetch(`${BASE}/search?term=${q}&country=KR&media=music&entity=song&limit=15`),
-    apiFetch(`${BASE}/search?term=${q}&country=KR&media=music&entity=album&limit=8`),
+    apiFetch(`${ITUNES}/search?term=${q}&country=KR&media=music&entity=song&limit=15`),
+    apiFetch(`${ITUNES}/search?term=${q}&country=KR&media=music&entity=album&limit=8`),
   ]);
   return {
     tracks: (trackData.results || []).map(formatTrack),
@@ -19,8 +40,9 @@ export async function searchMusic(query) {
   };
 }
 
+// ── 앨범 수록곡 ───────────────────────────────────────────────
 export async function getAlbumTracks(collectionId) {
-  const data = await apiFetch(`${BASE}/lookup?id=${collectionId}&entity=song&country=KR`);
+  const data = await apiFetch(`${ITUNES}/lookup?id=${collectionId}&entity=song&country=KR`);
   const items = data.results || [];
   const albumInfo = items.find(i => i.wrapperType === "collection");
   const tracks = items
@@ -30,6 +52,7 @@ export async function getAlbumTracks(collectionId) {
   return { ...(albumInfo ? formatAlbum(albumInfo) : {}), trackList: tracks };
 }
 
+// ── 스트리밍 외부 링크 ────────────────────────────────────────
 export function getStreamingLinks(track) {
   const q = encodeURIComponent(`${track.t} ${track.ar}`);
   return [
@@ -40,6 +63,46 @@ export function getStreamingLinks(track) {
   ];
 }
 
+// ── RSS 포맷 변환 (Apple Music RSS) ──────────────────────────
+function formatRssTrack(item) {
+  return {
+    id: String(item.id || Math.random()),
+    itunesId: item.id,
+    t: item.name || "",
+    ar: item.artistName || "",
+    al: item.albumName || item.collectionName || "",
+    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0, 4)) : null,
+    coverUrl: item.artworkUrl100?.replace("100x100bb", "400x400bb") || "",
+    coverSmUrl: item.artworkUrl100 || "",
+    itunesUrl: item.url || "",
+    dur: "",
+    genre: item.genreName || "",
+    bpm: null,
+    type: "album_track",
+    rec: 0, rt: 0, g: 0,
+  };
+}
+
+function formatRssAlbum(item) {
+  return {
+    id: String(item.id || Math.random()),
+    itunesId: item.id,
+    t: item.name || "",
+    ar: item.artistName || "",
+    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0, 4)) : null,
+    coverUrl: item.artworkUrl100?.replace("100x100bb", "400x400bb") || "",
+    coverSmUrl: item.artworkUrl100 || "",
+    itunesUrl: item.url || "",
+    altype: "앨범",
+    label: "",
+    genre: item.genreName || "",
+    tracks: 0,
+    dur: "", trackList: [],
+    rec: 0, rt: 0, g: 0,
+  };
+}
+
+// ── iTunes Search 포맷 변환 ───────────────────────────────────
 export function formatTrack(item) {
   if (!item) return null;
   return {

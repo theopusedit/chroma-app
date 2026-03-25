@@ -5,7 +5,7 @@ import supabase, {
   saveRecord, getMyRecords, getPublicFeed,
   getMyLists, createList, saveListAssignment,
 } from './supabase.js';
-import { searchMusic, getAlbumTracks, getStreamingLinks } from './music.js';
+import { searchMusic, getAlbumTracks, getStreamingLinks, getTopChart, getNewReleases } from './music.js';
 
 // ── 색상 단축키 ───────────────────────────────────────────────
 const C = CONFIG.colors;
@@ -271,9 +271,8 @@ const TCard = ({item,t,onClick,w=140,recorded=false}) => (
         borderRadius:"50%",background:C.primary,display:"flex",alignItems:"center",
         justifyContent:"center",fontSize:10,color:"#fff",fontWeight:700}}>✓</div>}
     </div>
-    <div style={{marginTop:10,fontSize:13,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx}}>{item?.t||""}</div>
-    <div style={{fontSize:12,color:t.tx2,marginTop:2}}>{item?.ar||""}</div>
-    <Stars n={item?.rt||0} s={10}/>
+    <div style={{marginTop:8,fontSize:13,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx,textAlign:"left"}}>{item?.t||""}</div>
+    <div style={{fontSize:12,color:t.tx2,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textAlign:"left"}}>{item?.ar||""}</div>
   </div>
 );
 
@@ -514,7 +513,7 @@ function MoreSheet({t,onClose,track,onListModal}){
 // ── HOME ──────────────────────────────────────────────────────
 function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNotif,onSeeAll}){
   const [chart,setChart]=useState("global");
-  const [era,setEra]=useState("00s");
+  const [era,setEra]=useState("20s");
   const [trending,setTrending]=useState([]);
   const [newAlbums,setNewAlbums]=useState([]);
   const [chartTracks,setChartTracks]=useState([]);
@@ -522,41 +521,53 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
   const [loading,setLoading]=useState(true);
   const pick=CONFIG.home.todayPick;
 
+  // iTunes 장르 ID
+  const chartGenreIds={"global":null,"kr":1,"pop":14,"indie":1010};
   const eraQueries={
-    "70s":"1970s classic hits disco funk",
-    "80s":"1980s pop rock new wave",
-    "90s":"1990s hits grunge alternative",
-    "00s":"2000s pop hits kpop",
-    "10s":"2010s kpop bts exo",
-    "20s":"2022 2023 2024 kpop aespa newjeans",
+    "70s":"1970s classic hits",
+    "80s":"1980s pop rock hits",
+    "90s":"1990s pop hits",
+    "00s":"2000s pop kpop hits",
+    "10s":"2010s hits kpop",
+    "20s":"2020s kpop pop hits",
   };
-  const chartQueries={
-    "global":"top hits 2024 billie eilish taylor swift",
-    "kr":"kpop top 2024 aespa ive newjeans",
-    "pop":"pop hits 2024 english taylor dua lipa",
-    "indie":"indie folk 2024 phoebe bridgers",
-  };
-  const chartLabels={
-    "global":"🌍 전체","kr":"🇰🇷 한국","pop":"팝","indie":"인디",
-  };
+  const chartLabels={"global":"🌍 전체","kr":"🇰🇷 한국","pop":"팝","indie":"인디"};
 
   useEffect(()=>{
+    // RSS API로 실시간 데이터 로드
     Promise.all([
-      searchMusic("kpop 2024 aespa newjeans ive"),
-      searchMusic("korean new album release 2024"),
-      searchMusic(chartQueries["global"]),
-    ]).then(([tr,al,ch])=>{
-      setTrending(tr.tracks.slice(0,8));
-      setNewAlbums(al.albums.slice(0,6));
-      setChartTracks(ch.tracks.slice(0,8));
+      getTopChart(10),
+      getNewReleases(8),
+    ]).then(([top,releases])=>{
+      setTrending(top);
+      setNewAlbums(releases);
+      setChartTracks(top.slice(0,8));
       setLoading(false);
-    }).catch(()=>setLoading(false));
-    // 초기 era 로드
-    searchMusic(eraQueries["00s"]).then(d=>setEraTracks(d.tracks.slice(0,25))).catch(()=>{});
+    }).catch(()=>{
+      // RSS 실패시 iTunes 검색으로 fallback
+      searchMusic("kpop 2024").then(d=>{
+        setTrending(d.tracks.slice(0,10));
+        setNewAlbums(d.albums.slice(0,8));
+        setChartTracks(d.tracks.slice(0,8));
+        setLoading(false);
+      }).catch(()=>setLoading(false));
+    });
+    // 초기 시대별 로드 (20s = 최신)
+    searchMusic("2024 2025 kpop pop hits").then(d=>{
+      const sorted=[...d.tracks].sort((a,b)=>(b.yr||0)-(a.yr||0));
+      setEraTracks(sorted.slice(0,25));
+    }).catch(()=>{});
   },[]);
 
   useEffect(()=>{
-    searchMusic(chartQueries[chart]).then(d=>setChartTracks(d.tracks.slice(0,8))).catch(()=>{});
+    if(chart==="global"||chart==="kr"){
+      getTopChart(8).then(d=>setChartTracks(d)).catch(()=>
+        searchMusic(chart==="kr"?"kpop 2024":"top hits 2024").then(d=>setChartTracks(d.tracks.slice(0,8)))
+      );
+    } else {
+      const q=chart==="pop"?"pop hits 2024 english":"indie folk 2024";
+      searchMusic(q).then(d=>setChartTracks(d.tracks.slice(0,8))).catch(()=>{});
+    }
   },[chart]);
 
   useEffect(()=>{
@@ -724,6 +735,7 @@ function SearchScreen({t,onTrack,records,onSeeAll,onGenre}){
   const [q,setQ]=useState("");
   const [results,setResults]=useState({tracks:[],albums:[]});
   const [loading,setLoading]=useState(false);
+  const [searchTab,setSearchTab]=useState("all"); // all | tracks | albums
   const [popularTracks,setPopularTracks]=useState([]);
   const [genreCovers,setGenreCovers]=useState({});
 
@@ -739,14 +751,135 @@ function SearchScreen({t,onTrack,records,onSeeAll,onGenre}){
   ];
 
   useEffect(()=>{
-    searchMusic("kpop popular 2024 ive aespa").then(d=>setPopularTracks(d.tracks.slice(0,10))).catch(()=>{});
-    // 장르별 썸네일 미리 로드
+    getTopChart(10).then(d=>setPopularTracks(d)).catch(()=>
+      searchMusic("kpop popular 2024").then(d=>setPopularTracks(d.tracks.slice(0,10))).catch(()=>{})
+    );
     genres.forEach(g=>{
       searchMusic(g.q).then(d=>{
         if(d.tracks[0]?.coverUrl) setGenreCovers(p=>({...p,[g.n]:d.tracks[0].coverUrl}));
       }).catch(()=>{});
     });
   },[]);
+
+  useEffect(()=>{
+    if(!q.trim()){setResults({tracks:[],albums:[]});setSearchTab("all");return;}
+    const timer=setTimeout(async()=>{
+      setLoading(true);
+      try{ const d=await searchMusic(q); setResults(d); }
+      catch(e){ console.error(e); }
+      setLoading(false);
+    },400);
+    return()=>clearTimeout(timer);
+  },[q]);
+
+  const trackItem=(tr,i)=>(
+    <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 20px",cursor:"pointer",borderBottom:`1px solid ${t.bd}`}} onClick={()=>onTrack(tr)}>
+      <div style={{width:46,height:46,borderRadius:9,flexShrink:0,overflow:"hidden",
+        background:tr.coverUrl?"#111":bg(i%8),
+        backgroundImage:tr.coverUrl?`url(${tr.coverUrl})`:"none",
+        backgroundSize:"cover",backgroundPosition:"center",
+        display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"rgba(255,255,255,0.3)"}}>
+        {!tr.coverUrl&&"♪"}
+      </div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:14,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx,textAlign:"left"}}>{tr.t}</div>
+        <div style={{fontSize:12,color:t.tx2,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textAlign:"left"}}>{tr.ar}</div>
+      </div>
+      {records[String(tr.id||tr.itunesId)]&&<span style={{fontSize:10,color:C.primary,background:`${C.primary}15`,padding:"2px 7px",borderRadius:10,flexShrink:0,fontWeight:600}}>기록됨</span>}
+    </div>
+  );
+
+  const albumItem=(al,i)=>(
+    <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 20px",cursor:"pointer",borderBottom:`1px solid ${t.bd}`}}>
+      <div style={{width:46,height:46,borderRadius:9,flexShrink:0,overflow:"hidden",
+        background:al.coverUrl?"#111":bg(i%8),
+        backgroundImage:al.coverUrl?`url(${al.coverUrl})`:"none",
+        backgroundSize:"cover",backgroundPosition:"center",
+        display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"rgba(255,255,255,0.3)"}}>
+        {!al.coverUrl&&"♪"}
+      </div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:14,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx,textAlign:"left"}}>{al.t}</div>
+        <div style={{fontSize:12,color:t.tx2,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textAlign:"left"}}>{al.ar} · {al.yr}</div>
+      </div>
+    </div>
+  );
+
+  return(
+    <div>
+      <div style={{padding:"52px 20px 16px"}}>
+        <div style={{fontSize:30,fontWeight:800,letterSpacing:-.8,color:t.tx,marginBottom:16}}>탐색</div>
+        <div style={{position:"relative"}}>
+          <span style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",color:t.tx3,fontSize:17}}>⌕</span>
+          <input style={{...inputStyle(t),paddingLeft:44,paddingRight:40}}
+            placeholder="곡, 앨범, 아티스트 검색" value={q} onChange={e=>setQ(e.target.value)}/>
+          {q&&<span style={{position:"absolute",right:14,top:"50%",transform:"translateY(-50%)",color:t.tx3,cursor:"pointer",fontSize:15}} onClick={()=>setQ("")}>✕</span>}
+        </div>
+      </div>
+      {q?(
+        <div>
+          {/* 탭 */}
+          <div style={{display:"flex",gap:8,padding:"0 20px 12px",overflowX:"auto"}}>
+            {[["all","전체"],["tracks","곡"],["albums","앨범"]].map(([id,label])=>(
+              <div key={id} style={{flexShrink:0,padding:"6px 16px",borderRadius:20,fontSize:13,fontWeight:600,cursor:"pointer",
+                background:searchTab===id?C.primary:t.sf,
+                color:searchTab===id?"#fff":t.tx2,
+                border:`1px solid ${searchTab===id?C.primary:t.bd}`}}
+                onClick={()=>setSearchTab(id)}>{label}</div>
+            ))}
+          </div>
+          {loading&&<div style={{padding:"24px 20px",textAlign:"center",color:t.tx3,fontSize:13}}>검색 중...</div>}
+          {!loading&&(
+            <>
+              {(searchTab==="all"||searchTab==="tracks")&&results.tracks.map(trackItem)}
+              {(searchTab==="all"||searchTab==="albums")&&results.albums.map(albumItem)}
+              {results.tracks.length===0&&results.albums.length===0&&(
+                <div style={{padding:"48px 20px",textAlign:"center",color:t.tx2}}>검색 결과가 없어요</div>
+              )}
+            </>
+          )}
+        </div>
+      ):(
+        <>
+          <Sec title="장르" t={t}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,padding:"0 20px"}}>
+              {genres.map(g=>(
+                <div key={g.n} style={{position:"relative",padding:"20px 16px",borderRadius:14,
+                  background:genreCovers[g.n]?`url(${genreCovers[g.n]})`:`${g.c}`,
+                  backgroundSize:"cover",backgroundPosition:"center",
+                  fontSize:15,fontWeight:700,cursor:"pointer",color:"#fff",
+                  overflow:"hidden",minHeight:70,display:"flex",alignItems:"flex-end"}}
+                  onClick={()=>onGenre(g.n,g.q)}>
+                  {genreCovers[g.n]&&<div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.45)"}}/>}
+                  <span style={{position:"relative",zIndex:1}}>{g.n}</span>
+                </div>
+              ))}
+            </div>
+          </Sec>
+          <Sec title="지금 인기" t={t} action="전체보기" onAction={()=>onSeeAll("popular","지금 인기",popularTracks,"kpop popular 2024")}>
+            {popularTracks.length===0?<div style={{padding:"20px",textAlign:"center",color:t.tx3,fontSize:13}}>불러오는 중...</div>
+            :popularTracks.slice(0,6).map((tr,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 20px",cursor:"pointer",borderBottom:`1px solid ${t.bd}`}} onClick={()=>onTrack(tr)}>
+                <span style={{fontSize:15,fontWeight:700,color:i<3?C.primary:t.tx3,width:22,flexShrink:0,textAlign:"right"}}>{i+1}</span>
+                <div style={{width:46,height:46,borderRadius:9,flexShrink:0,overflow:"hidden",
+                  background:tr.coverUrl?"#111":bg(i%8),
+                  backgroundImage:tr.coverUrl?`url(${tr.coverUrl})`:"none",
+                  backgroundSize:"cover",backgroundPosition:"center",
+                  display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"rgba(255,255,255,0.3)"}}>
+                  {!tr.coverUrl&&"♪"}
+                </div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:14,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx,textAlign:"left"}}>{tr.t}</div>
+                  <div style={{fontSize:12,color:t.tx2,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textAlign:"left"}}>{tr.ar}</div>
+                </div>
+              </div>
+            ))}
+          </Sec>
+        </>
+      )}
+    </div>
+  );
+}
 
   useEffect(()=>{
     if(!q.trim()){setResults({tracks:[],albums:[]});return;}
@@ -1089,7 +1222,7 @@ function TrackScreen({t,track,onBack,onRecord,onListModal,onMore,records,trackLi
 
       {similar.length>0&&(
         <Sec title={`${tr.ar}의 다른 곡`} t={t}>
-          <HScroll>{similar.map((s,i)=><TCard key={i} item={s} t={t} onClick={()=>{}} w={115}/>)}</HScroll>
+          <HScroll>{similar.map((s,i)=><TCard key={i} item={s} t={t} onClick={()=>onTrack(s)} w={115}/>)}</HScroll>
         </Sec>
       )}
 
@@ -1106,26 +1239,50 @@ function TrackScreen({t,track,onBack,onRecord,onListModal,onMore,records,trackLi
 
 // ── ALBUM DETAIL ──────────────────────────────────────────────
 function AlbumScreen({t,album,onBack,onTrack,records}){
-  const al=album||ALBUMS[0];
-  const alTracks=TRACKS.filter(tr=>tr.alid===al.id);
+  const al=album||{t:"",ar:"",g:0,yr:null,altype:"앨범",label:"",genre:"",tracks:0,dur:"",rec:0,rt:0};
+  const [alTracks,setAlTracks]=useState([]);
+  const [loadingTracks,setLoadingTracks]=useState(true);
+
+  useEffect(()=>{
+    const id=al.itunesId||al.collectionId||al.id;
+    if(!id){setLoadingTracks(false);return;}
+    setLoadingTracks(true);
+    getAlbumTracks(id).then(data=>{
+      if(data.trackList?.length>0) setAlTracks(data.trackList);
+      setLoadingTracks(false);
+    }).catch(()=>setLoadingTracks(false));
+  },[al.itunesId||al.id]);
+
+  const coverBg=al.coverUrl
+    ?{backgroundImage:`url(${al.coverUrl})`,backgroundSize:"cover",backgroundPosition:"center",filter:"blur(40px) brightness(0.35)",transform:"scale(1.1)"}
+    :{background:`linear-gradient(180deg,${GR[(al.g||0)%8][0]}cc 0%,${t.bg} 82%)`};
+
   return(
     <div style={{minHeight:"100vh",background:t.bg,paddingBottom:40}}>
       <div style={{position:"relative",overflow:"hidden",paddingBottom:24}}>
-        <div style={{position:"absolute",inset:0,background:`linear-gradient(180deg,${GR[al.g][0]}cc 0%,${t.bg} 82%)`}}/>
+        <div style={{position:"absolute",inset:0}}>
+          {al.coverUrl
+            ?<div style={{position:"absolute",inset:0,...coverBg}}/>
+            :<div style={{position:"absolute",inset:0,background:`linear-gradient(180deg,${GR[(al.g||0)%8][0]}cc 0%,${t.bg} 82%)`}}/>}
+        </div>
         <div style={{position:"relative",zIndex:1,padding:"0 20px"}}>
           <div style={{paddingTop:52,paddingBottom:20}}><IconBtn icon="‹" t={t} onClick={onBack}/></div>
           <div style={{display:"flex",justifyContent:"center",marginBottom:20}}>
-            <Cover g={al.g} size={170} r={18}/>
+            {al.coverUrl
+              ?<div style={{width:170,height:170,borderRadius:18,overflow:"hidden",boxShadow:"0 16px 48px rgba(0,0,0,0.4)"}}>
+                <img src={al.coverUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+               </div>
+              :<Cover g={al.g||0} size={170} r={18}/>}
           </div>
           <div style={{textAlign:"center"}}>
             <div style={{fontWeight:800,fontSize:24,color:"#fff",letterSpacing:-.5,lineHeight:1.2}}>{al.t}</div>
             <div style={{fontSize:15,color:"rgba(255,255,255,0.6)",marginTop:5}}>{al.ar}</div>
-            <div style={{fontSize:12,color:"rgba(255,255,255,0.35)",marginTop:3}}>{al.altype} · {al.yr} · {al.label}</div>
+            <div style={{fontSize:12,color:"rgba(255,255,255,0.35)",marginTop:3}}>{al.altype||"앨범"} · {al.yr}</div>
           </div>
         </div>
       </div>
       <div style={{display:"flex",justifyContent:"space-around",padding:"20px",marginBottom:22}}>
-        {[[al.rec.toLocaleString(),"기록"],[al.rt.toFixed(1),"평점"],[al.tracks,"트랙"]].map(([n,l])=>(
+        {[["0","기록"],["—","평점"],[alTracks.length||al.tracks||"—","트랙"]].map(([n,l])=>(
           <div key={l} style={{textAlign:"center"}}>
             <div style={{fontSize:24,fontWeight:800,color:t.tx,letterSpacing:-.5}}>{n}</div>
             <div style={{fontSize:11,color:t.tx3,marginTop:2}}>{l}</div>
@@ -1139,7 +1296,7 @@ function AlbumScreen({t,album,onBack,onTrack,records}){
       <div style={{margin:"0 20px 28px"}}>
         <div style={{fontSize:13,fontWeight:600,color:t.tx2,marginBottom:12}}>앨범 정보</div>
         <div style={{background:t.sf,borderRadius:16,padding:"4px 0",border:`1px solid ${t.bd}`}}>
-          {[["유형",al.altype],["장르",al.genre],["수록곡",`${al.tracks}곡`],["총 길이",al.dur],["레이블",al.label],["발매연도",`${al.yr}년`]].map(([label,val],i,arr)=>(
+          {[["유형",al.altype||"앨범"],["장르",al.genre||"—"],["레이블",al.label||"—"],["발매연도",al.yr?`${al.yr}년`:"—"]].map(([label,val],i,arr)=>(
             <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"13px 18px",borderBottom:i<arr.length-1?`1px solid ${t.bd}`:"none"}}>
               <span style={{fontSize:14,color:t.tx2}}>{label}</span>
               <span style={{fontSize:14,fontWeight:500,color:t.tx}}>{val}</span>
@@ -1148,18 +1305,23 @@ function AlbumScreen({t,album,onBack,onTrack,records}){
         </div>
       </div>
       <div style={{padding:"0 20px 16px"}}>
-        <div style={{fontSize:17,fontWeight:700,color:t.tx,marginBottom:14,letterSpacing:-.3}}>수록곡 {al.tracks}</div>
-        {(alTracks.length>0?alTracks:TRACKS.slice(0,3)).map((tr,i)=>(
-          <div key={tr.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:`1px solid ${t.bd}`,cursor:"pointer"}} onClick={()=>onTrack(tr)}>
+        <div style={{fontSize:17,fontWeight:700,color:t.tx,marginBottom:14,letterSpacing:-.3}}>
+          수록곡 {alTracks.length||""}
+        </div>
+        {loadingTracks&&<div style={{padding:"20px",textAlign:"center",color:t.tx3,fontSize:13}}>수록곡 불러오는 중...</div>}
+        {alTracks.map((tr,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:`1px solid ${t.bd}`,cursor:"pointer"}} onClick={()=>onTrack(tr)}>
             <span style={{fontSize:14,color:t.tx3,width:22,textAlign:"right",flexShrink:0}}>{i+1}</span>
             <div style={{flex:1,minWidth:0}}>
               <div style={{fontSize:14,fontWeight:500,color:t.tx,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{tr.t}</div>
-              <div style={{fontSize:12,color:t.tx2,marginTop:1}}>{tr.dur}</div>
+              <div style={{fontSize:12,color:t.tx2,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{tr.ar||al.ar}</div>
             </div>
-            {records[tr.id]&&<span style={{fontSize:11,color:C.primary,fontWeight:700}}>✓</span>}
-            <span style={{color:t.tx3,fontSize:14,cursor:"pointer"}}>···</span>
+            {records[String(tr.id||tr.itunesId)]&&<span style={{fontSize:11,color:C.primary,fontWeight:700,flexShrink:0}}>✓</span>}
           </div>
         ))}
+        {!loadingTracks&&alTracks.length===0&&(
+          <div style={{padding:"20px",textAlign:"center",color:t.tx3,fontSize:13}}>수록곡 정보를 불러올 수 없어요</div>
+        )}
       </div>
     </div>
   );
@@ -1894,8 +2056,8 @@ export default function App(){
       <style>{`
         ${CONFIG.fonts.import}
         *{box-sizing:border-box;margin:0;padding:0;}
-        html,body{height:100%;background:#000;}
-        body{font-family:${CONFIG.fonts.family};}
+        html{background:${t.bg};}
+        body{font-family:${CONFIG.fonts.family};background:${t.bg};overscroll-behavior:none;}
         ::-webkit-scrollbar{display:none;}
         input,textarea{outline:none;border:none;font-family:${CONFIG.fonts.family};}
         @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
