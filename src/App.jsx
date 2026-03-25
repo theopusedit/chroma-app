@@ -586,11 +586,20 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
     }).catch(()=>{});
   },[era]);
 
+  // 시간대별 인사말
+  const getGreeting=()=>{
+    const h=new Date().getHours();
+    if(h>=5&&h<12) return "좋은 아침이에요 ☀️";
+    if(h>=12&&h<17) return "좋은 오후예요 🎵";
+    if(h>=17&&h<21) return "좋은 저녁이에요 🌙";
+    return "늦은 밤이네요 🌃";
+  };
+
   return(
     <div>
       <div style={{padding:"52px 20px 20px",display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
         <div>
-          <div style={{fontSize:13,color:t.tx2,marginBottom:3}}>{CONFIG.home.greeting}</div>
+          <div style={{fontSize:13,color:t.tx2,marginBottom:3}}>{getGreeting()}</div>
           <div style={{fontSize:30,fontWeight:800,letterSpacing:-.8,color:t.tx}}>{CONFIG.service.name}</div>
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -1043,7 +1052,7 @@ function ArchiveScreen({t,onTrack,records,lists,trackLists}){
 }
 
 // ── TRACK DETAIL ──────────────────────────────────────────────
-function TrackScreen({t,track,onBack,onRecord,onListModal,onMore,onAlbum,records,trackLists,lists}){
+function TrackScreen({t,track,onBack,onRecord,onListModal,onMore,onAlbum,onSimilar,records,trackLists,lists}){
   const tr=track||TRACKS[0];
   const trackId=String(tr.id||tr.itunesId||'');
   const existing=records[trackId];
@@ -1150,7 +1159,6 @@ function TrackScreen({t,track,onBack,onRecord,onListModal,onMore,onAlbum,records
         <div style={{background:t.sf,borderRadius:16,padding:"4px 0",border:`1px solid ${t.bd}`}}>
           {[
             ["장르", tr.genre||"—"],
-            ["BPM", tr.bpm||"iTunes 미제공"],
             ["길이", tr.dur||"—"],
             ["발매연도", tr.yr?`${tr.yr}년`:"—"],
             ["유형", typeLabel[tr.type]||"앨범 수록곡"],
@@ -1175,13 +1183,13 @@ function TrackScreen({t,track,onBack,onRecord,onListModal,onMore,onAlbum,records
 
       {similar.length>0&&(
         <Sec title={`${tr.ar}의 다른 곡`} t={t}>
-          <HScroll>{similar.map((s,i)=><TCard key={i} item={s} t={t} onClick={()=>onTrack(s)} w={115}/>)}</HScroll>
+          <HScroll>{similar.map((s,i)=><TCard key={i} item={s} t={t} onClick={()=>onSimilar&&onSimilar(s)} w={115}/>)}</HScroll>
         </Sec>
       )}
 
       <div style={{height:1,background:t.bd,margin:"0 0 4px"}}/>
       <Sec title="리뷰" t={t} action="전체보기">
-        <div style={{padding:"24px 20px",textAlign:"center",color:t.tx3,fontSize:13}}>
+        <div style={{padding:"20px 20px 8px",textAlign:"left",color:t.tx3,fontSize:13}}>
           아직 등록된 리뷰가 없어요<br/>
           <span style={{fontSize:11,marginTop:4,display:"block"}}>첫 번째 리뷰를 남겨보세요</span>
         </div>
@@ -1281,10 +1289,36 @@ function AlbumScreen({t,album,onBack,onTrack,records}){
 }
 
 // ── ANNUAL REPORT ─────────────────────────────────────────────
-function AnnualReport({t,onBack}){
+function AnnualReport({t,onBack,records}){
   const months=["1월","2월","3월","4월","5월","6월","7월","8월","9월","10월","11월","12월"];
-  const counts=[3,7,12,5,18,22,15,8,24,31,19,14];
-  const max=Math.max(...counts);
+
+  // records에서 실제 데이터 계산
+  const recList=Object.values(records||{});
+  const totalCount=recList.length;
+
+  // 아티스트별 집계
+  const artistCount={};
+  recList.forEach(r=>{
+    const ar=r.artist||"알 수 없음";
+    artistCount[ar]=(artistCount[ar]||0)+1;
+  });
+  const topArtists=Object.entries(artistCount).sort((a,b)=>b[1]-a[1]).slice(0,3);
+
+  // 월별 집계 (listened_date 기준)
+  const monthlyCounts=Array(12).fill(0);
+  recList.forEach(r=>{
+    if(r.date){
+      const m=new Date(r.date).getMonth();
+      if(!isNaN(m)) monthlyCounts[m]++;
+    }
+  });
+  const maxCount=Math.max(...monthlyCounts,1);
+
+  // 올해의 곡 (가장 최근 기록)
+  const topTrack=recList.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0];
+
+  const hasData=totalCount>0;
+
   return(
     <div style={{minHeight:"100vh",background:t.bg,paddingBottom:60}}>
       <div style={{background:`linear-gradient(160deg,${GR[1][0]},${GR[5][0]},${C.primaryDark})`,padding:"52px 24px 40px"}}>
@@ -1295,60 +1329,67 @@ function AnnualReport({t,onBack}){
         </div>
         <div style={{fontSize:11,letterSpacing:.18,textTransform:"uppercase",color:"rgba(255,255,255,0.5)",fontWeight:700,marginBottom:10}}>2025 {CONFIG.service.name}</div>
         <div style={{fontSize:40,fontWeight:800,color:"#fff",letterSpacing:-2,lineHeight:1.1,marginBottom:6}}>나의<br/>연간 리포트</div>
-        <div style={{fontSize:14,color:"rgba(255,255,255,0.5)"}}>2025년 1월 1일 — 12월 31일</div>
+        <div style={{fontSize:14,color:"rgba(255,255,255,0.5)"}}>2025년 기록 통계</div>
       </div>
+
       <div style={{padding:"32px 20px 0"}}>
+        {/* 총 기록 수 */}
         <div style={{textAlign:"center",marginBottom:36}}>
-          <div style={{fontSize:80,fontWeight:800,color:t.tx,letterSpacing:-4,lineHeight:1}}>178</div>
+          <div style={{fontSize:80,fontWeight:800,color:t.tx,letterSpacing:-4,lineHeight:1}}>{totalCount}</div>
           <div style={{fontSize:16,color:t.tx2,marginTop:8}}>곡을 기록했어요</div>
-          <div style={{fontSize:13,color:C.primary,marginTop:4,fontWeight:600}}>상위 12% 유저</div>
+          {totalCount===0&&<div style={{fontSize:13,color:t.tx3,marginTop:8}}>탐색에서 곡을 찾아 기록을 시작해보세요 🎵</div>}
         </div>
+
+        {/* 올해의 아티스트 */}
         <div style={{marginBottom:36}}>
-          <div style={{fontSize:18,fontWeight:700,color:t.tx,marginBottom:16,letterSpacing:-.3}}>올해의 아티스트</div>
-          {[{rank:1,name:"아이유",count:"23곡",g:1},{rank:2,name:"Muse",count:"18곡",g:0},{rank:3,name:"The Weeknd",count:"14곡",g:3}].map((a)=>(
-            <div key={a.rank} style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
-              <span style={{fontSize:20,fontWeight:800,color:a.rank===1?C.primary:t.tx3,width:24}}>{a.rank}</span>
-              <Cover g={a.g} size={48} r={10}/>
-              <div style={{flex:1}}><div style={{fontSize:15,fontWeight:600,color:t.tx}}>{a.name}</div><div style={{fontSize:12,color:t.tx2}}>{a.count}</div></div>
+          <div style={{fontSize:18,fontWeight:700,color:t.tx,marginBottom:16,letterSpacing:-.3}}>가장 많이 기록한 아티스트</div>
+          {!hasData&&<div style={{fontSize:13,color:t.tx3}}>기록이 쌓이면 여기에 나타나요</div>}
+          {topArtists.map(([name,count],i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
+              <span style={{fontSize:20,fontWeight:800,color:i===0?C.primary:t.tx3,width:24}}>{i+1}</span>
+              <Cover g={i} size={48} r={10}/>
+              <div style={{flex:1}}>
+                <div style={{fontSize:15,fontWeight:600,color:t.tx}}>{name}</div>
+                <div style={{fontSize:12,color:t.tx2}}>{count}곡</div>
+              </div>
             </div>
           ))}
         </div>
+
+        {/* 월별 기록 */}
         <div style={{marginBottom:36}}>
           <div style={{fontSize:18,fontWeight:700,color:t.tx,marginBottom:16,letterSpacing:-.3}}>월별 기록</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:8}}>
             {months.map((m,i)=>(
               <div key={m} style={{textAlign:"center"}}>
-                <div style={{height:50,background:`${C.primary}${Math.round((counts[i]/max)*220+35).toString(16).padStart(2,"0")}`,borderRadius:8,marginBottom:5}}/>
+                <div style={{height:50,background:monthlyCounts[i]>0?`${C.primary}${Math.round((monthlyCounts[i]/maxCount)*220+35).toString(16).padStart(2,"0")}`:t.sf2,borderRadius:8,marginBottom:5}}/>
                 <div style={{fontSize:10,color:t.tx3}}>{m}</div>
-                <div style={{fontSize:11,fontWeight:600,color:t.tx}}>{counts[i]}</div>
+                <div style={{fontSize:11,fontWeight:600,color:t.tx}}>{monthlyCounts[i]}</div>
               </div>
             ))}
           </div>
         </div>
-        <div style={{background:t.sf,borderRadius:20,padding:"20px",marginBottom:24,border:`1px solid ${t.bd}`}}>
-          <div style={{fontSize:12,color:C.primary,fontWeight:700,letterSpacing:.1,textTransform:"uppercase",marginBottom:12}}>올해의 곡</div>
-          <div style={{display:"flex",gap:14,alignItems:"center"}}>
-            <Cover g={1} size={60} r={10}/>
-            <div><div style={{fontSize:17,fontWeight:800,color:t.tx,letterSpacing:-.3}}>밤편지</div><div style={{fontSize:13,color:t.tx2,marginTop:3}}>아이유</div></div>
-          </div>
-        </div>
-        <div style={{marginBottom:36}}>
-          <div style={{fontSize:18,fontWeight:700,color:t.tx,marginBottom:16,letterSpacing:-.3}}>가장 들은 장르</div>
-          {[["K-Pop / Indie Pop",42],["Alternative Rock",28],["R&B / Soul",18],["OST",12]].map(([genre,pct])=>(
-            <div key={genre} style={{marginBottom:12}}>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:5}}>
-                <span style={{color:t.tx,fontWeight:500}}>{genre}</span>
-                <span style={{color:t.tx2}}>{pct}%</span>
-              </div>
-              <div style={{height:5,background:t.sf,borderRadius:3,overflow:"hidden"}}>
-                <div style={{width:`${pct}%`,height:"100%",background:`linear-gradient(90deg,${C.primary},#A78BFA)`,borderRadius:3}}/>
+
+        {/* 최근 기록 곡 */}
+        {topTrack&&(
+          <div style={{background:t.sf,borderRadius:20,padding:"20px",marginBottom:24,border:`1px solid ${t.bd}`}}>
+            <div style={{fontSize:12,color:C.primary,fontWeight:700,letterSpacing:.1,textTransform:"uppercase",marginBottom:12}}>가장 최근 기록</div>
+            <div style={{display:"flex",gap:14,alignItems:"center"}}>
+              {topTrack.coverUrl
+                ?<div style={{width:60,height:60,borderRadius:10,overflow:"hidden",flexShrink:0}}><img src={topTrack.coverUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/></div>
+                :<Cover g={0} size={60} r={10}/>}
+              <div>
+                <div style={{fontSize:17,fontWeight:800,color:t.tx,letterSpacing:-.3}}>{topTrack.track_title||"알 수 없음"}</div>
+                <div style={{fontSize:13,color:t.tx2,marginTop:3}}>{topTrack.artist||""}</div>
+                {topTrack.rating>0&&<Stars n={topTrack.rating} s={13}/>}
               </div>
             </div>
-          ))}
-        </div>
+          </div>
+        )}
+
         <div style={{borderRadius:20,padding:"24px",textAlign:"center",background:`linear-gradient(135deg,${C.primaryDark},${GR[1][0]})`}}>
           <div style={{fontSize:14,color:"rgba(255,255,255,0.6)",marginBottom:6}}>2025년에 기록한 곡</div>
-          <div style={{fontSize:48,fontWeight:800,color:"#fff",letterSpacing:-2,lineHeight:1}}>178</div>
+          <div style={{fontSize:48,fontWeight:800,color:"#fff",letterSpacing:-2,lineHeight:1}}>{totalCount}</div>
           <div style={{fontSize:13,color:"rgba(255,255,255,0.5)",marginTop:8}}>계속 기록해나가세요 🎵</div>
         </div>
       </div>
@@ -1710,33 +1751,67 @@ function RecordModal({t,track,existing,onClose,onSave}){
   const [date,setDate]=useState(existing?.date||"");
   const [isPublic,setIsPublic]=useState(existing?.isPublic||false);
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
-      <div style={{background:t.sf,borderRadius:"22px 22px 0 0",padding:"0 20px 44px",width:"100%",maxWidth:390,maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
-        <div style={{width:36,height:4,background:t.bd,borderRadius:2,margin:"12px auto 20px"}}/>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
-          <div style={{fontSize:20,fontWeight:800,letterSpacing:-.3,color:t.tx}}>{existing?"기록 수정":"기록하기"}</div>
-          {existing&&<span style={{fontSize:12,color:C.red,cursor:"pointer",padding:"5px 12px",border:`1px solid ${C.red}30`,borderRadius:8}}>삭제</span>}
+    <div style={{position:"fixed",inset:0,background:t.bg,zIndex:200,overflowY:"auto"}}>
+      <div style={{maxWidth:480,margin:"0 auto",minHeight:"100vh",padding:"0 0 40px"}}>
+        {/* 헤더 */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"52px 20px 20px"}}>
+          <div style={{fontSize:22,fontWeight:800,letterSpacing:-.3,color:t.tx}}>{existing?"기록 수정":"기록하기"}</div>
+          <div style={{display:"flex",gap:10,alignItems:"center"}}>
+            {existing&&<span style={{fontSize:12,color:C.red,cursor:"pointer",padding:"7px 14px",border:`1px solid ${C.red}30`,borderRadius:10}}>삭제</span>}
+            <div onClick={onClose} style={{width:36,height:36,borderRadius:"50%",background:t.sf,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,color:t.tx2}}>✕</div>
+          </div>
         </div>
-        <div style={{display:"flex",gap:12,padding:"13px",background:t.bg,borderRadius:14,marginBottom:22,border:`1px solid ${t.bd}`}}>
-          <Cover g={track?.g||0} size={48} r={8}/>
-          <div><div style={{fontSize:14,fontWeight:700,color:t.tx}}>{track?.t||"곡 제목"}</div><div style={{fontSize:12,color:t.tx2,marginTop:2}}>{track?.ar} · {track?.al}</div></div>
+
+        {/* 곡 정보 — 앨범 자켓 포함 */}
+        <div style={{margin:"0 20px 28px",display:"flex",gap:16,alignItems:"center",padding:"16px",background:t.sf,borderRadius:18,border:`1px solid ${t.bd}`}}>
+          {track?.coverUrl
+            ?<div style={{width:72,height:72,borderRadius:12,overflow:"hidden",flexShrink:0}}>
+               <img src={track.coverUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+             </div>
+            :<Cover g={track?.g||0} size={72} r={12}/>}
+          <div style={{minWidth:0}}>
+            <div style={{fontSize:16,fontWeight:700,color:t.tx,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{track?.t||"곡 제목"}</div>
+            <div style={{fontSize:13,color:t.tx2,marginTop:3}}>{track?.ar}</div>
+            {track?.al&&<div style={{fontSize:12,color:t.tx3,marginTop:2}}>{track.al}</div>}
+          </div>
         </div>
-        <div style={{display:"flex",justifyContent:"center",gap:6,marginBottom:24}}>
-          {[1,2,3,4,5].map(s=>(
-            <span key={s} style={{fontSize:34,cursor:"pointer",color:s<=rating?C.gold:t.bd,transition:"color 0.1s"}} onClick={()=>setRating(s)}>★</span>
-          ))}
+
+        {/* 별점 */}
+        <div style={{padding:"0 20px 24px"}}>
+          <div style={{fontSize:13,fontWeight:600,color:t.tx2,marginBottom:14}}>별점</div>
+          <div style={{display:"flex",gap:8}}>
+            {[1,2,3,4,5].map(s=>(
+              <span key={s} style={{fontSize:40,cursor:"pointer",color:s<=rating?C.gold:t.bd,transition:"color 0.1s"}} onClick={()=>setRating(s)}>★</span>
+            ))}
+          </div>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
-          <span style={{fontSize:13,color:t.tx2,width:84,flexShrink:0}}>처음 들은 날</span>
-          <input style={inputStyle(t)} value={date} onChange={e=>setDate(e.target.value)} placeholder="예: 2019년 여름"/>
+
+        {/* 처음 들은 날 */}
+        <div style={{padding:"0 20px 20px"}}>
+          <div style={{fontSize:13,fontWeight:600,color:t.tx2,marginBottom:10}}>처음 들은 날</div>
+          <input style={inputStyle(t)} value={date} onChange={e=>setDate(e.target.value)} placeholder="예: 2019년 여름, 고등학교 때"/>
         </div>
-        <textarea style={{width:"100%",background:t.bg,border:`1px solid ${t.bd}`,borderRadius:12,padding:"14px",color:t.tx,fontSize:14,resize:"none",lineHeight:1.6,marginBottom:4,fontFamily:"inherit",minHeight:100}} value={memo} onChange={e=>setMemo(e.target.value)} placeholder="이 곡에 대한 기억이나 감상을 남겨보세요"/>
-        <div style={{textAlign:"right",fontSize:11,color:t.tx3,marginBottom:18}}>{memo.length}/500</div>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:22}}>
-          <div><div style={{fontSize:13,fontWeight:600,color:t.tx}}>피드에 공개</div><div style={{fontSize:11,color:t.tx3,marginTop:2}}>다른 사람들이 볼 수 있어요</div></div>
+
+        {/* 감상 메모 */}
+        <div style={{padding:"0 20px 8px"}}>
+          <div style={{fontSize:13,fontWeight:600,color:t.tx2,marginBottom:10}}>감상</div>
+          <textarea style={{width:"100%",background:t.sf,border:`1px solid ${t.bd}`,borderRadius:14,padding:"16px",color:t.tx,fontSize:14,resize:"none",lineHeight:1.65,fontFamily:"inherit",minHeight:140}} value={memo} onChange={e=>setMemo(e.target.value.slice(0,500))} placeholder="이 곡에 대한 기억이나 감상을 남겨보세요"/>
+          <div style={{textAlign:"right",fontSize:11,color:t.tx3,marginTop:6}}>{memo.length}/500</div>
+        </div>
+
+        {/* 피드 공개 */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 20px",margin:"8px 20px",background:t.sf,borderRadius:14,border:`1px solid ${t.bd}`}}>
+          <div>
+            <div style={{fontSize:14,fontWeight:600,color:t.tx}}>피드에 공개</div>
+            <div style={{fontSize:12,color:t.tx3,marginTop:2}}>다른 사람들이 볼 수 있어요</div>
+          </div>
           <Toggle on={isPublic} onToggle={()=>setIsPublic(!isPublic)} t={t}/>
         </div>
-        <div style={{background:C.primary,color:"#fff",padding:"15px",borderRadius:14,textAlign:"center",fontSize:15,fontWeight:700,cursor:"pointer"}} onClick={()=>{onSave({rating,memo,date,isPublic});onClose();}}>저장하기</div>
+
+        {/* 저장 버튼 */}
+        <div style={{padding:"20px 20px 0"}}>
+          <div style={{background:C.primary,color:"#fff",padding:"16px",borderRadius:14,textAlign:"center",fontSize:15,fontWeight:700,cursor:"pointer"}} onClick={()=>{onSave({rating,memo,date,isPublic});onClose();}}>저장하기</div>
+        </div>
       </div>
     </div>
   );
@@ -2050,7 +2125,7 @@ export default function App(){
             {showNotif&&<NotifPanel t={t} onClose={()=>setShowNotif(false)}/>}
           </>
         )}
-        {page==="track"&&<TrackScreen t={t} track={selTrack} onBack={()=>setPage("app")} onRecord={tr=>{setSelTrack(tr);setModal("record");}} onListModal={tr=>{setSelTrack(tr);setModal("list");}} onMore={tr=>{setSelTrack(tr);setModal("more");}} onAlbum={goAlbum} records={records} trackLists={trackLists} lists={lists}/>}
+        {page==="track"&&<TrackScreen t={t} track={selTrack} onBack={()=>setPage("app")} onRecord={tr=>{setSelTrack(tr);setModal("record");}} onListModal={tr=>{setSelTrack(tr);setModal("list");}} onMore={tr=>{setSelTrack(tr);setModal("more");}} onAlbum={goAlbum} onSimilar={tr=>{setSelTrack(tr);window.scrollTo(0,0);}} records={records} trackLists={trackLists} lists={lists}/>}
         {page==="album"&&<AlbumScreen t={t} album={selAlbum} onBack={()=>setPage("app")} onTrack={goTrack} records={records}/>}
         {page==="user"&&<UserProfileScreen t={t} uid={viewUser.uid} username={viewUser.username} onBack={()=>setPage("app")}/>}
         {page==="settings"&&<SettingsScreen t={t} dark={dark} setDark={setDark} onBack={()=>setPage("app")} onSub={()=>setPage("sub")} onLanding={()=>setPage("landing")} onLogout={handleLogout} profile={profile} onEditProfile={()=>setPage("editProfile")}/>}
