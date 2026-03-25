@@ -769,17 +769,7 @@ function SearchScreen({t,onTrack,onAlbum,records,onSeeAll,onGenre}){
 
   useEffect(()=>{
     getChart("us", 10).then(d=>setPopularTracks(d)).catch(()=>{});
-    // 장르 썸네일: 순차적으로 로드해서 rate limit 방지
-    const loadCovers = async () => {
-      for (const g of genres) {
-        try {
-          const d = await searchMusic(g.q, "US");
-          if(d.tracks[0]?.coverUrl) setGenreCovers(p=>({...p,[g.n]:d.tracks[0].coverUrl}));
-          await new Promise(r => setTimeout(r, 100)); // 100ms 간격
-        } catch(e) {}
-      }
-    };
-    loadCovers();
+    // 썸네일 로딩 제거 - rate limit 방지
   },[]);
 
   useEffect(()=>{
