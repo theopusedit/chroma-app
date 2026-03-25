@@ -1,20 +1,34 @@
-// api/spotify.js — Spotify API 프록시
+// api/spotify.js
+let cachedToken = null;
+let tokenExpiry = 0;
+
+async function getToken() {
+  if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
+  const res = await fetch("https://accounts.spotify.com/api/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: "Basic " + Buffer.from(
+        process.env.VITE_SPOTIFY_CLIENT_ID + ":" + process.env.SPOTIFY_CLIENT_SECRET
+      ).toString("base64"),
+    },
+    body: "grant_type=client_credentials",
+  });
+  const data = await res.json();
+  cachedToken = data.access_token;
+  tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
+  return cachedToken;
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  const { type, q, id, market = "KR", limit = 20, country = "KR" } = req.query;
+  res.setHeader("Cache-Control", "s-maxage=300"); // 5분 캐시
+
+  const { type, q, id, market = "US", limit = 20, country = "US" } = req.query;
+
   try {
-    const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: "Basic " + Buffer.from(
-          process.env.VITE_SPOTIFY_CLIENT_ID + ":" + process.env.SPOTIFY_CLIENT_SECRET
-        ).toString("base64"),
-      },
-      body: "grant_type=client_credentials",
-    });
-    const { access_token } = await tokenRes.json();
-    const h = { Authorization: `Bearer ${access_token}` };
+    const token = await getToken();
+    const h = { Authorization: `Bearer ${token}` };
     let url = "";
 
     if (type === "search") {
@@ -35,17 +49,31 @@ export default async function handler(req, res) {
       url = `https://api.spotify.com/v1/artists/${id}/related-artists`;
     } else if (type === "recommendations") {
       url = `https://api.spotify.com/v1/recommendations?seed_tracks=${id}&market=${market}&limit=${limit}`;
-    } else if (type === "recommendations-by-artists") {
-      url = `https://api.spotify.com/v1/recommendations?seed_artists=${id}&market=${market}&limit=${limit}`;
     } else if (type === "new-releases") {
       url = `https://api.spotify.com/v1/browse/new-releases?country=${country}&limit=${limit}`;
     } else {
       return res.status(400).json({ error: "Unknown type" });
     }
 
-    const data = await fetch(url, { headers: h }).then(r => r.json());
+    const spotifyRes = await fetch(url, { headers: h });
+    
+    // Rate limit 처리
+    if (spotifyRes.status === 429) {
+      const retryAfter = spotifyRes.headers.get("Retry-After") || "2";
+      return res.status(429).json({ error: "rate_limit", retryAfter });
+    }
+    
+    const data = await spotifyRes.json();
+    
+    // Spotify 에러 응답 처리
+    if (data.error) {
+      console.error("Spotify error:", data.error);
+      return res.status(data.error.status || 500).json({ error: data.error.message });
+    }
+    
     return res.status(200).json(data);
   } catch (error) {
+    console.error("Handler error:", error);
     return res.status(500).json({ error: error.message });
   }
 }

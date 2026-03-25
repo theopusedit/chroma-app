@@ -755,25 +755,31 @@ function SearchScreen({t,onTrack,onAlbum,records,onSeeAll,onGenre}){
   const [genreCovers,setGenreCovers]=useState({});
 
   const genres=[
-    {n:"K-Pop",   c:"#2d1b2d", key:"kpop"},
-    {n:"J-Pop",   c:"#1a1a3a", key:"jpop"},
-    {n:"인디",    c:"#0a2e1b", key:"indie"},
-    {n:"팝",      c:"#2d1418", key:"pop"},
-    {n:"클래식",  c:"#2a1a0a", key:"classic"},
-    {n:"OST",     c:"#0a2d3d", key:"ost"},
-    {n:"힙합",    c:"#1a2a0a", key:"hiphop"},
-    {n:"R&B",     c:"#2a1a18", key:"rnb"},
-    {n:"재즈",    c:"#0e1b4a", key:"jazz"},
-    {n:"댄스",    c:"#2a1a3a", key:"dance"},
+    {n:"K-Pop",   c:"#2d1b2d", key:"kpop",    q:"aespa"},
+    {n:"J-Pop",   c:"#1a1a3a", key:"jpop",    q:"yoasobi"},
+    {n:"인디",    c:"#0a2e1b", key:"indie",   q:"phoebe bridgers"},
+    {n:"팝",      c:"#2d1418", key:"pop",     q:"taylor swift"},
+    {n:"클래식",  c:"#2a1a0a", key:"classic", q:"beethoven"},
+    {n:"OST",     c:"#0a2d3d", key:"ost",     q:"hans zimmer"},
+    {n:"힙합",    c:"#1a2a0a", key:"hiphop",  q:"drake"},
+    {n:"R&B",     c:"#2a1a18", key:"rnb",     q:"sza"},
+    {n:"재즈",    c:"#0e1b4a", key:"jazz",    q:"miles davis"},
+    {n:"댄스",    c:"#2a1a3a", key:"dance",   q:"calvin harris"},
   ];
 
   useEffect(()=>{
     getChart("us", 10).then(d=>setPopularTracks(d)).catch(()=>{});
-    genres.forEach(g=>{
-      getGenreTracks(g.key, 1).then(d=>{
-        if(d[0]?.coverUrl) setGenreCovers(p=>({...p,[g.n]:d[0].coverUrl}));
-      }).catch(()=>{});
-    });
+    // 장르 썸네일: 순차적으로 로드해서 rate limit 방지
+    const loadCovers = async () => {
+      for (const g of genres) {
+        try {
+          const d = await searchMusic(g.q, "US");
+          if(d.tracks[0]?.coverUrl) setGenreCovers(p=>({...p,[g.n]:d.tracks[0].coverUrl}));
+          await new Promise(r => setTimeout(r, 100)); // 100ms 간격
+        } catch(e) {}
+      }
+    };
+    loadCovers();
   },[]);
 
   useEffect(()=>{
