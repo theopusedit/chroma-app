@@ -1,123 +1,139 @@
-// src/music.js
-// 모든 API 호출은 /api/music 프록시를 통해 서버에서 실행 → CORS 없음
+// src/music.js — Spotify API 기반 (서버 프록시 경유)
+const SP = "/api/spotify";
 
-const PROXY = "/api/music";
-
-async function call(params) {
-  const url = PROXY + "?" + new URLSearchParams(params).toString();
+async function sp(params) {
+  const url = SP + "?" + new URLSearchParams(params).toString();
   const res = await fetch(url);
-  if (!res.ok) throw new Error("API 오류");
+  if (!res.ok) throw new Error("Spotify API 오류");
   return res.json();
 }
 
-// ── 글로벌 실시간 차트 (Apple Music RSS) ─────────────────────
-// country: us=글로벌, kr=한국, gb=영국, jp=일본, au=호주
-export async function getTopChart(limit = 25, country = "us") {
-  const data = await call({ type: "chart", country, limit });
-  return (data.feed?.results || []).map(formatRssTrack);
+// ── Spotify 차트 플레이리스트 ID ──────────────────────────────
+const CHARTS = {
+  global: "37i9dQZEVXbMDoHDwVN2tF",  // Global Top 50
+  kr:     "37i9dQZEVXbNxXF4SkHj9F",  // Korea Top 50
+  pop:    "37i9dQZF1DXarRysLJmuju",   // Pop Rising
+  indie:  "37i9dQZF1DX2sUQwD7tbmL",  // Indie Pop
+  kpop:   "37i9dQZF1DX9tPFwDMOaN1",  // K-Pop Hits
+  hiphop: "37i9dQZF1DX0XUsuxWHRQd",  // Hip-Hop Central
+  rnb:    "37i9dQZF1DX4SBhb3fqCJd",  // R&B Hits
+  jazz:   "37i9dQZF1DXbITWG1ZJKYt",  // Jazz Classics
+  dance:  "37i9dQZF1DXa2PvUpywmrr",  // Dance Hits
+  jpop:   "37i9dQZF1DXafb0IuPwJyF",  // J-Pop Hits
+  ost:    "37i9dQZF1DWZUAeYvs68zg",  // OST / Soundtracks
+  classic:"37i9dQZF1DWWEJlAGA9gs0",  // Classical Essentials
+};
+
+// ── 실시간 차트 ────────────────────────────────────────────────
+export async function getChart(chartKey = "global", limit = 25) {
+  const playlistId = CHARTS[chartKey] || CHARTS.global;
+  const data = await sp({ type: "charts", id: playlistId, limit });
+  return (data.items || [])
+    .filter(item => item?.track)
+    .slice(0, limit)
+    .map(item => formatTrack(item.track));
 }
 
-// ── 한국 차트 ─────────────────────────────────────────────────
-export async function getKrChart(limit = 25) {
-  const data = await call({ type: "chart", country: "kr", limit });
-  return (data.feed?.results || []).map(formatRssTrack);
-}
-
-// ── 최신 앨범 (발매일 기준 최신) ─────────────────────────────
-export async function getNewReleases(limit = 10, country = "us") {
-  const data = await call({ type: "new-releases", country, limit });
-  return (data.feed?.results || []).map(formatRssAlbum);
+// ── 최신 신보 ─────────────────────────────────────────────────
+export async function getNewReleases(limit = 10, country = "KR") {
+  const data = await sp({ type: "new-releases", country, limit });
+  return (data.albums?.items || []).map(formatAlbum);
 }
 
 // ── 검색 ──────────────────────────────────────────────────────
-export async function searchMusic(query, country = "KR") {
-  const [trackData, albumData] = await Promise.all([
-    call({ type: "search", query, country, entity: "song", limit: 15 }),
-    call({ type: "search", query, country, entity: "album", limit: 8 }),
-  ]);
+export async function searchMusic(query, market = "KR") {
+  const data = await sp({ type: "search", q: query, market, limit: 15 });
   return {
-    tracks: (trackData.results || []).map(formatTrack),
-    albums: (albumData.results || []).map(formatAlbum),
+    tracks: (data.tracks?.items || []).map(formatTrack),
+    albums: (data.albums?.items || []).map(formatAlbum),
+    artists: (data.artists?.items || []).map(formatArtist),
   };
 }
 
 // ── 앨범 수록곡 ───────────────────────────────────────────────
-export async function getAlbumTracks(collectionId) {
-  const data = await call({ type: "lookup", query: collectionId });
-  const items = data.results || [];
-  const albumInfo = items.find(i => i.wrapperType === "collection");
-  const tracks = items
-    .filter(i => i.wrapperType === "track")
-    .sort((a, b) => a.trackNumber - b.trackNumber)
-    .map(formatTrack);
-  return { ...(albumInfo ? formatAlbum(albumInfo) : {}), trackList: tracks };
+export async function getAlbumTracks(albumId) {
+  const data = await sp({ type: "album", id: albumId });
+  const tracks = (data.tracks?.items || []).map((tr, i) => ({
+    id: tr.id,
+    spotifyId: tr.id,
+    t: tr.name,
+    ar: tr.artists?.map(a => a.name).join(", ") || "",
+    al: data.name || "",
+    yr: data.release_date ? parseInt(data.release_date.slice(0, 4)) : null,
+    coverUrl: data.images?.[0]?.url || "",
+    coverSmUrl: data.images?.[2]?.url || "",
+    dur: msToTime(tr.duration_ms),
+    genre: "",
+    bpm: null,
+    type: "album_track",
+    trackNumber: tr.track_number,
+    spotifyUrl: tr.external_urls?.spotify || "",
+    rec: 0, rt: 0, g: 0,
+  }));
+  return {
+    ...formatAlbum(data),
+    trackList: tracks,
+  };
+}
+
+// ── BPM 포함 곡 상세 ──────────────────────────────────────────
+export async function getTrackWithFeatures(trackId) {
+  const [track, features] = await Promise.all([
+    sp({ type: "track", id: trackId }),
+    sp({ type: "audio-features", id: trackId }).catch(() => ({})),
+  ]);
+  return {
+    ...formatTrack(track),
+    bpm: features.tempo ? Math.round(features.tempo) : null,
+    energy: features.energy ? Math.round(features.energy * 100) : null,
+    danceability: features.danceability ? Math.round(features.danceability * 100) : null,
+  };
+}
+
+// ── 비슷한 곡 추천 ────────────────────────────────────────────
+export async function getRecommendations(trackId, limit = 10) {
+  const data = await sp({ type: "recommendations", id: trackId, limit });
+  return (data.tracks || []).map(formatTrack);
+}
+
+// ── 아티스트 인기곡 ───────────────────────────────────────────
+export async function getArtistTracks(artistId) {
+  const data = await sp({ type: "artist-tracks", id: artistId });
+  return (data.tracks || []).map(formatTrack);
 }
 
 // ── 스트리밍 링크 ─────────────────────────────────────────────
 export function getStreamingLinks(track) {
   const q = encodeURIComponent(`${track.t} ${track.ar}`);
   return [
-    { name: "Apple Music", url: track.itunesUrl || `https://music.apple.com/kr/search?term=${q}` },
+    { name: "Spotify", url: track.spotifyUrl || `https://open.spotify.com/search/${q}` },
+    { name: "Apple Music", url: `https://music.apple.com/kr/search?term=${q}` },
     { name: "YouTube Music", url: `https://music.youtube.com/search?q=${q}` },
     { name: "Melon", url: `https://www.melon.com/search/total/index.htm?q=${q}` },
-    { name: "Spotify", url: `https://open.spotify.com/search/${q}` },
   ];
 }
 
-// ── RSS 포맷 ──────────────────────────────────────────────────
-function formatRssTrack(item) {
-  return {
-    id: String(item.id || Math.random()),
-    itunesId: item.id,
-    t: item.name || "",
-    ar: item.artistName || "",
-    al: item.albumName || "",
-    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0, 4)) : null,
-    coverUrl: item.artworkUrl100?.replace("100x100bb", "600x600bb") || "",
-    coverSmUrl: item.artworkUrl100 || "",
-    itunesUrl: item.url || "",
-    dur: "", genre: item.genreName || "",
-    bpm: null, type: "album_track",
-    rec: 0, rt: 0, g: 0,
-  };
-}
-
-function formatRssAlbum(item) {
-  return {
-    id: String(item.id || Math.random()),
-    itunesId: item.id,
-    t: item.name || "",
-    ar: item.artistName || "",
-    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0, 4)) : null,
-    coverUrl: item.artworkUrl100?.replace("100x100bb", "600x600bb") || "",
-    coverSmUrl: item.artworkUrl100 || "",
-    itunesUrl: item.url || "",
-    altype: "앨범", label: "",
-    genre: item.genreName || "",
-    tracks: 0, dur: "", trackList: [],
-    rec: 0, rt: 0, g: 0,
-  };
-}
-
-// ── iTunes 포맷 ───────────────────────────────────────────────
+// ── 포맷 변환 ─────────────────────────────────────────────────
 export function formatTrack(item) {
   if (!item) return null;
   return {
-    id: String(item.trackId || item.collectionId || Math.random()),
-    itunesId: item.trackId,
-    collectionId: item.collectionId,
-    t: item.trackName || item.collectionName || "",
-    ar: item.artistName || "",
-    al: item.collectionName || "",
-    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0, 4)) : null,
-    coverUrl: item.artworkUrl100?.replace("100x100bb", "600x600bb") || "",
-    coverSmUrl: item.artworkUrl100 || "",
-    itunesUrl: item.trackViewUrl || item.collectionViewUrl || "",
-    dur: msToTime(item.trackTimeMillis || 0),
-    genre: item.primaryGenreName || "",
+    id: item.id || String(Math.random()),
+    spotifyId: item.id,
+    collectionId: item.album?.id,
+    t: item.name || "",
+    ar: item.artists?.map(a => a.name).join(", ") || "",
+    al: item.album?.name || "",
+    yr: item.album?.release_date ? parseInt(item.album.release_date.slice(0, 4)) : null,
+    coverUrl: item.album?.images?.[0]?.url || "",
+    coverSmUrl: item.album?.images?.[2]?.url || "",
+    spotifyUrl: item.external_urls?.spotify || "",
+    itunesUrl: "",
+    dur: msToTime(item.duration_ms || 0),
+    genre: "",
     bpm: null,
-    type: item.collectionType === "Single" ? "싱글" : "앨범 수록곡",
-    altype: item.collectionType || "앨범",
+    popularity: item.popularity || 0,
+    type: item.album?.album_type === "single" ? "싱글" : "앨범 수록곡",
+    altype: item.album?.album_type || "앨범",
     rec: 0, rt: 0, g: 0,
   };
 }
@@ -125,20 +141,34 @@ export function formatTrack(item) {
 export function formatAlbum(item) {
   if (!item) return null;
   return {
-    id: String(item.collectionId || Math.random()),
-    itunesId: item.collectionId,
-    t: item.collectionName || "",
-    ar: item.artistName || "",
-    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0, 4)) : null,
-    coverUrl: item.artworkUrl100?.replace("100x100bb", "600x600bb") || "",
-    coverSmUrl: item.artworkUrl100 || "",
-    itunesUrl: item.collectionViewUrl || "",
-    altype: item.collectionType || "앨범",
-    label: item.copyright || "",
-    genre: item.primaryGenreName || "",
-    tracks: item.trackCount || 0,
+    id: item.id || String(Math.random()),
+    spotifyId: item.id,
+    t: item.name || "",
+    ar: item.artists?.map(a => a.name).join(", ") || "",
+    yr: item.release_date ? parseInt(item.release_date.slice(0, 4)) : null,
+    coverUrl: item.images?.[0]?.url || "",
+    coverSmUrl: item.images?.[2]?.url || "",
+    spotifyUrl: item.external_urls?.spotify || "",
+    itunesUrl: "",
+    altype: item.album_type || "앨범",
+    label: item.label || "",
+    genre: item.genres?.join(", ") || "",
+    tracks: item.total_tracks || 0,
     dur: "", trackList: [],
     rec: 0, rt: 0, g: 0,
+  };
+}
+
+export function formatArtist(item) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    spotifyId: item.id,
+    name: item.name || "",
+    coverUrl: item.images?.[0]?.url || "",
+    genres: item.genres || [],
+    popularity: item.popularity || 0,
+    spotifyUrl: item.external_urls?.spotify || "",
   };
 }
 
