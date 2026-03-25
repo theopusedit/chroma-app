@@ -502,10 +502,40 @@ function MoreSheet({t,onClose,track}){
 }
 
 // ── HOME ──────────────────────────────────────────────────────
-function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNotif}){
+function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNotif,onSeeAll}){
   const [chart,setChart]=useState("global");
   const [era,setEra]=useState("00s");
-  const pick = CONFIG.home.todayPick;
+  const [trending,setTrending]=useState([]);
+  const [newAlbums,setNewAlbums]=useState([]);
+  const [chartTracks,setChartTracks]=useState([]);
+  const [eraTracks,setEraTracks]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const pick=CONFIG.home.todayPick;
+
+  const eraQueries={"70s":"70s classic rock","80s":"80s pop hits","90s":"90s kpop hits","00s":"2000s kpop","10s":"2010s kpop","20s":"2020s kpop"};
+  const chartQueries={"global":"world hits 2024","kr":"kpop 2024","pop":"pop hits 2024","indie":"korean indie 2024"};
+
+  useEffect(()=>{
+    Promise.all([
+      searchMusic("kpop 2024"),
+      searchMusic("korean new album 2024"),
+      searchMusic(chartQueries[chart]),
+    ]).then(([tr,al,ch])=>{
+      setTrending(tr.tracks.slice(0,8));
+      setNewAlbums(al.albums.slice(0,6));
+      setChartTracks(ch.tracks.slice(0,6));
+      setLoading(false);
+    }).catch(()=>setLoading(false));
+  },[]);
+
+  useEffect(()=>{
+    searchMusic(chartQueries[chart]).then(d=>setChartTracks(d.tracks.slice(0,6))).catch(()=>{});
+  },[chart]);
+
+  useEffect(()=>{
+    searchMusic(eraQueries[era]).then(d=>setEraTracks(d.tracks.slice(0,8))).catch(()=>{});
+  },[era]);
+
   return(
     <div>
       <div style={{padding:"52px 20px 20px",display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
@@ -519,9 +549,9 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
         </div>
       </div>
 
+      {/* 히어로 배너 */}
       <div style={{margin:"0 20px 32px",background:`linear-gradient(145deg,${GR[pick.gradientIndex][0]},${GR[5][1]})`,
-        borderRadius:22,padding:"26px 22px",position:"relative",overflow:"hidden",cursor:"pointer"}}
-        onClick={()=>onTrack(TRACKS[1])}>
+        borderRadius:22,padding:"26px 22px",position:"relative",overflow:"hidden",cursor:"pointer"}}>
         <div style={{position:"absolute",right:-20,top:-20,fontSize:130,opacity:.05,lineHeight:1}}>♪</div>
         <div style={{fontSize:11,letterSpacing:.15,textTransform:"uppercase",color:"rgba(255,255,255,0.45)",marginBottom:8,fontWeight:700}}>{pick.label}</div>
         <div style={{fontSize:25,fontWeight:800,color:"#fff",marginBottom:3,letterSpacing:-.5}}>{pick.trackTitle}</div>
@@ -532,14 +562,20 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
         </div>
       </div>
 
-      <Sec title="지금 뜨는 곡" t={t} action="전체보기">
-        <HScroll>{TRACKS.slice(0,5).map(tr=><TCard key={tr.id} item={tr} t={t} onClick={()=>onTrack(tr)} recorded={!!records[tr.id]}/>)}</HScroll>
-      </Sec>
-      <Sec title="최신 앨범" t={t} action="전체보기">
-        <HScroll>{ALBUMS.map(al=><TCard key={al.id} item={al} t={t} onClick={()=>onAlbum(al)} w={150}/>)}</HScroll>
+      {/* 지금 뜨는 곡 */}
+      <Sec title="지금 뜨는 곡" t={t} action="전체보기" onAction={()=>onSeeAll("trending","지금 뜨는 곡",trending)}>
+        {loading?<div style={{padding:"20px",textAlign:"center",color:t.tx3,fontSize:13}}>불러오는 중...</div>
+        :<HScroll>{trending.map((tr,i)=><TCard key={i} item={tr} t={t} onClick={()=>onTrack(tr)} recorded={!!records[String(tr.id||tr.itunesId)]}/>)}</HScroll>}
       </Sec>
 
-      <Sec title="차트" t={t} action="전체보기">
+      {/* 최신 앨범 */}
+      <Sec title="최신 앨범" t={t} action="전체보기" onAction={()=>onSeeAll("albums","최신 앨범",newAlbums)}>
+        {loading?<div style={{padding:"20px",textAlign:"center",color:t.tx3,fontSize:13}}>불러오는 중...</div>
+        :<HScroll>{newAlbums.map((al,i)=><TCard key={i} item={al} t={t} onClick={()=>onAlbum(al)} w={150}/>)}</HScroll>}
+      </Sec>
+
+      {/* 차트 */}
+      <Sec title="차트" t={t} action="전체보기" onAction={()=>onSeeAll("chart","차트",chartTracks)}>
         <div style={{display:"flex",gap:8,padding:"0 20px",marginBottom:12,overflowX:"auto"}}>
           {[["global","🌍 전체"],["kr","🇰🇷 한국"],["pop","팝"],["indie","인디"]].map(([id,label])=>(
             <div key={id} style={{flexShrink:0,padding:"7px 16px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",
@@ -547,9 +583,26 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
               onClick={()=>setChart(id)}>{label}</div>
           ))}
         </div>
-        {TRACKS.slice(0,5).map((tr,i)=><RowItem key={tr.id} tr={tr} rank={i} t={t} onClick={()=>onTrack(tr)} recorded={!!records[tr.id]}/>)}
+        {chartTracks.length===0&&!loading&&<div style={{padding:"20px",textAlign:"center",color:t.tx3,fontSize:13}}>불러오는 중...</div>}
+        {chartTracks.map((tr,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 20px",cursor:"pointer",borderBottom:`1px solid ${t.bd}`}} onClick={()=>onTrack(tr)}>
+            <span style={{fontSize:15,fontWeight:700,color:i<3?C.primary:t.tx3,width:22,flexShrink:0,textAlign:"right"}}>{i+1}</span>
+            <div style={{width:46,height:46,borderRadius:9,flexShrink:0,overflow:"hidden",
+              background:tr.coverUrl?"#111":bg(i%8),
+              backgroundImage:tr.coverUrl?`url(${tr.coverUrl})`:"none",
+              backgroundSize:"cover",backgroundPosition:"center",
+              display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"rgba(255,255,255,0.3)"}}>
+              {!tr.coverUrl&&"♪"}
+            </div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:14,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx}}>{tr.t}</div>
+              <div style={{fontSize:12,color:t.tx2,marginTop:1}}>{tr.ar}</div>
+            </div>
+          </div>
+        ))}
       </Sec>
 
+      {/* 시대별 명곡 */}
       <Sec title="시대별 명곡" t={t}>
         <div style={{display:"flex",gap:8,padding:"0 20px",marginBottom:16,overflowX:"auto"}}>
           {["70s","80s","90s","00s","10s","20s"].map(e=>(
@@ -558,7 +611,8 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
               onClick={()=>setEra(e)}>{e}</div>
           ))}
         </div>
-        <HScroll>{TRACKS.slice(0,5).map(tr=><TCard key={tr.id} item={tr} t={t} onClick={()=>onTrack(tr)} recorded={!!records[tr.id]}/>)}</HScroll>
+        {eraTracks.length===0?<div style={{padding:"20px",textAlign:"center",color:t.tx3,fontSize:13}}>불러오는 중...</div>
+        :<HScroll>{eraTracks.map((tr,i)=><TCard key={i} item={tr} t={t} onClick={()=>onTrack(tr)} recorded={!!records[String(tr.id||tr.itunesId)]}/>)}</HScroll>}
       </Sec>
 
       <div style={{margin:"0 20px 40px",background:dark?"#0D0D1A":"#F3EEFF",border:`1px solid ${C.primary}25`,borderRadius:20,padding:"22px"}}>
@@ -636,10 +690,38 @@ function FeedScreen({t,onTrack,onUser,onMore,feedItems}){
 }
 
 // ── SEARCH ────────────────────────────────────────────────────
-function SearchScreen({t,onTrack,records}){
+function SearchScreen({t,onTrack,records,onSeeAll}){
   const [q,setQ]=useState("");
-  const genres=[{n:"K-Pop",c:"#2d1b2d"},{n:"인디",c:"#0a2e1b"},{n:"재즈",c:"#0e1b4a"},{n:"팝",c:"#2d1418"},{n:"클래식",c:"#2a1a0a"},{n:"OST",c:"#0a2d3d"},{n:"힙합",c:"#1a2a0a"},{n:"R&B",c:"#2a1a18"}];
-  const results=useMemo(()=>q?TRACKS.filter(tr=>tr.t.toLowerCase().includes(q.toLowerCase())||tr.ar.toLowerCase().includes(q.toLowerCase())):[],[q]);
+  const [results,setResults]=useState({tracks:[],albums:[]});
+  const [loading,setLoading]=useState(false);
+  const [popularTracks,setPopularTracks]=useState([]);
+
+  const genres=[
+    {n:"K-Pop",c:"#2d1b2d",q:"kpop 2024"},
+    {n:"인디",c:"#0a2e1b",q:"korean indie"},
+    {n:"재즈",c:"#0e1b4a",q:"jazz"},
+    {n:"팝",c:"#2d1418",q:"pop hits 2024"},
+    {n:"클래식",c:"#2a1a0a",q:"classical music"},
+    {n:"OST",c:"#0a2d3d",q:"korean drama ost"},
+    {n:"힙합",c:"#1a2a0a",q:"korean hiphop"},
+    {n:"R&B",c:"#2a1a18",q:"rnb 2024"},
+  ];
+
+  useEffect(()=>{
+    searchMusic("kpop popular 2024").then(d=>setPopularTracks(d.tracks.slice(0,10))).catch(()=>{});
+  },[]);
+
+  useEffect(()=>{
+    if(!q.trim()){setResults({tracks:[],albums:[]});return;}
+    const timer=setTimeout(async()=>{
+      setLoading(true);
+      try{ const d=await searchMusic(q); setResults(d); }
+      catch(e){ console.error(e); }
+      setLoading(false);
+    },400);
+    return()=>clearTimeout(timer);
+  },[q]);
+
   return(
     <div>
       <div style={{padding:"52px 20px 16px"}}>
@@ -650,23 +732,87 @@ function SearchScreen({t,onTrack,records}){
             placeholder="곡, 앨범, 아티스트 검색" value={q} onChange={e=>setQ(e.target.value)}/>
           {q&&<span style={{position:"absolute",right:14,top:"50%",transform:"translateY(-50%)",color:t.tx3,cursor:"pointer",fontSize:15}} onClick={()=>setQ("")}>✕</span>}
         </div>
-        {q&&<div style={{fontSize:11,color:t.tx3,marginTop:8}}>현재 샘플 데이터 내 검색 중 · Spotify 연동 후 전체 검색 가능</div>}
       </div>
       {q?(
         <div>
-          <div style={{padding:"0 20px 12px",fontSize:12,color:t.tx3}}>결과 {results.length}개</div>
-          {results.map(tr=><RowItem key={tr.id} tr={tr} t={t} onClick={()=>onTrack(tr)} recorded={!!records[tr.id]}/>)}
-          {results.length===0&&<div style={{padding:"48px 20px",textAlign:"center",color:t.tx2}}>검색 결과가 없어요</div>}
+          {loading&&<div style={{padding:"24px 20px",textAlign:"center",color:t.tx3,fontSize:13}}>검색 중...</div>}
+          {!loading&&(
+            <>
+              {results.tracks.length>0&&(
+                <>
+                  <div style={{padding:"12px 20px 4px",fontSize:12,fontWeight:600,color:t.tx3,textTransform:"uppercase",letterSpacing:.1}}>곡</div>
+                  {results.tracks.map((tr,i)=>(
+                    <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 20px",cursor:"pointer",borderBottom:`1px solid ${t.bd}`}} onClick={()=>onTrack(tr)}>
+                      <div style={{width:46,height:46,borderRadius:9,flexShrink:0,overflow:"hidden",
+                        background:tr.coverUrl?"#111":bg(i%8),
+                        backgroundImage:tr.coverUrl?`url(${tr.coverUrl})`:"none",
+                        backgroundSize:"cover",backgroundPosition:"center",
+                        display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"rgba(255,255,255,0.3)"}}>
+                        {!tr.coverUrl&&"♪"}
+                      </div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:14,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx}}>{tr.t}</div>
+                        <div style={{fontSize:12,color:t.tx2,marginTop:1}}>{tr.ar} · {tr.al}</div>
+                      </div>
+                      {records[String(tr.id||tr.itunesId)]&&<span style={{fontSize:10,color:C.primary,background:`${C.primary}15`,padding:"2px 7px",borderRadius:10,flexShrink:0,fontWeight:600}}>기록됨</span>}
+                    </div>
+                  ))}
+                </>
+              )}
+              {results.albums.length>0&&(
+                <>
+                  <div style={{padding:"16px 20px 4px",fontSize:12,fontWeight:600,color:t.tx3,textTransform:"uppercase",letterSpacing:.1}}>앨범</div>
+                  {results.albums.map((al,i)=>(
+                    <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 20px",cursor:"pointer",borderBottom:`1px solid ${t.bd}`}}>
+                      <div style={{width:46,height:46,borderRadius:9,flexShrink:0,overflow:"hidden",
+                        background:al.coverUrl?"#111":bg(i%8),
+                        backgroundImage:al.coverUrl?`url(${al.coverUrl})`:"none",
+                        backgroundSize:"cover",backgroundPosition:"center",
+                        display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"rgba(255,255,255,0.3)"}}>
+                        {!al.coverUrl&&"♪"}
+                      </div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:14,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx}}>{al.t}</div>
+                        <div style={{fontSize:12,color:t.tx2,marginTop:1}}>{al.ar} · {al.yr}</div>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+              {results.tracks.length===0&&results.albums.length===0&&(
+                <div style={{padding:"48px 20px",textAlign:"center",color:t.tx2}}>검색 결과가 없어요</div>
+              )}
+            </>
+          )}
         </div>
       ):(
         <>
           <Sec title="장르" t={t}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,padding:"0 20px"}}>
-              {genres.map(g=><div key={g.n} style={{padding:"20px 16px",borderRadius:14,background:g.c,fontSize:14,fontWeight:700,cursor:"pointer",color:"rgba(255,255,255,0.9)"}}>{g.n}</div>)}
+              {genres.map(g=>(
+                <div key={g.n} style={{padding:"20px 16px",borderRadius:14,background:g.c,fontSize:14,fontWeight:700,cursor:"pointer",color:"rgba(255,255,255,0.9)"}}
+                  onClick={()=>onSeeAll("genre",g.n,[],g.q)}>{g.n}</div>
+              ))}
             </div>
           </Sec>
-          <Sec title="지금 인기" t={t} action="전체보기">
-            {TRACKS.slice(0,6).map((tr,i)=><RowItem key={tr.id} tr={tr} rank={i} t={t} onClick={()=>onTrack(tr)} recorded={!!records[tr.id]}/>)}
+          <Sec title="지금 인기" t={t} action="전체보기" onAction={()=>onSeeAll("popular","지금 인기",popularTracks)}>
+            {popularTracks.length===0?<div style={{padding:"20px",textAlign:"center",color:t.tx3,fontSize:13}}>불러오는 중...</div>
+            :popularTracks.slice(0,6).map((tr,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 20px",cursor:"pointer",borderBottom:`1px solid ${t.bd}`}} onClick={()=>onTrack(tr)}>
+                <span style={{fontSize:15,fontWeight:700,color:i<3?C.primary:t.tx3,width:22,flexShrink:0,textAlign:"right"}}>{i+1}</span>
+                <div style={{width:46,height:46,borderRadius:9,flexShrink:0,overflow:"hidden",
+                  background:tr.coverUrl?"#111":bg(i%8),
+                  backgroundImage:tr.coverUrl?`url(${tr.coverUrl})`:"none",
+                  backgroundSize:"cover",backgroundPosition:"center",
+                  display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"rgba(255,255,255,0.3)"}}>
+                  {!tr.coverUrl&&"♪"}
+                </div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:14,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx}}>{tr.t}</div>
+                  <div style={{fontSize:12,color:t.tx2,marginTop:1}}>{tr.ar}</div>
+                </div>
+              </div>
+            ))}
           </Sec>
         </>
       )}
@@ -1399,14 +1545,58 @@ function ListModal({t,track,lists,trackLists,onClose,onSave}){
   );
 }
 
+// ── 전체보기 화면 ─────────────────────────────────────────────
+function SeeAllScreen({t,title,items,onBack,onTrack,query}){
+  const [tracks,setTracks]=useState(items||[]);
+  const [loading,setLoading]=useState(false);
+  useEffect(()=>{
+    if(query&&items.length===0){
+      setLoading(true);
+      searchMusic(query).then(d=>{setTracks(d.tracks);setLoading(false);}).catch(()=>setLoading(false));
+    }
+  },[]);
+  return(
+    <div style={{minHeight:"100vh",background:t.bg,paddingBottom:40}}>
+      <div style={{padding:"52px 20px 16px",display:"flex",alignItems:"center",gap:14,borderBottom:`1px solid ${t.bd}`}}>
+        <IconBtn icon="‹" t={t} onClick={onBack}/>
+        <div style={{fontSize:22,fontWeight:800,letterSpacing:-.5,color:t.tx}}>{title}</div>
+      </div>
+      {loading&&<div style={{padding:"48px 20px",textAlign:"center",color:t.tx3,fontSize:13}}>불러오는 중...</div>}
+      {tracks.map((tr,i)=>(
+        <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 20px",borderBottom:`1px solid ${t.bd}`,cursor:"pointer"}} onClick={()=>onTrack(tr)}>
+          <div style={{width:50,height:50,borderRadius:10,flexShrink:0,overflow:"hidden",
+            background:tr.coverUrl?"#111":bg(i%8),
+            backgroundImage:tr.coverUrl?`url(${tr.coverUrl})`:"none",
+            backgroundSize:"cover",backgroundPosition:"center",
+            display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"rgba(255,255,255,0.3)"}}>
+            {!tr.coverUrl&&"♪"}
+          </div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:14,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx}}>{tr.t||tr.name||""}</div>
+            <div style={{fontSize:12,color:t.tx2,marginTop:2}}>{tr.ar||""}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── BOTTOM NAV ────────────────────────────────────────────────
 function BottomNav({t,nav,setNav}){
   return(
-    <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:390,background:`${t.bg}f8`,backdropFilter:"blur(20px)",borderTop:`1px solid ${t.bd}`,display:"flex",justifyContent:"space-around",padding:"10px 0 24px",zIndex:100}}>
+    <div style={{
+      position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)",
+      width:"100%", maxWidth:480,
+      background:`${t.bg}f8`, backdropFilter:"blur(20px)",
+      borderTop:`1px solid ${t.bd}`,
+      display:"flex", justifyContent:"space-around",
+      padding:"10px 0 max(env(safe-area-inset-bottom),20px)",
+      zIndex:1000,
+    }}>
       {[{id:"home",icon:"⊞",label:"홈"},{id:"feed",icon:"◈",label:"피드"},{id:"search",icon:"○",label:"탐색"},{id:"archive",icon:"◉",label:"보관함"},{id:"profile",icon:"◎",label:"프로필"}].map(item=>(
-        <div key={item.id} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,cursor:"pointer",padding:"4px 14px"}} onClick={()=>setNav(item.id)}>
+        <div key={item.id} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,cursor:"pointer",padding:"4px 14px",minWidth:0,flex:1}} onClick={()=>setNav(item.id)}>
           <span style={{fontSize:21,opacity:nav===item.id?1:0.3,transition:"opacity 0.18s",color:nav===item.id?C.primary:t.tx}}>{item.icon}</span>
-          <span style={{fontSize:10,color:nav===item.id?C.primary:t.tx2,fontWeight:nav===item.id?700:400}}>{item.label}</span>
+          <span style={{fontSize:10,color:nav===item.id?C.primary:t.tx2,fontWeight:nav===item.id?700:400,whiteSpace:"nowrap"}}>{item.label}</span>
         </div>
       ))}
     </div>
@@ -1424,6 +1614,7 @@ export default function App(){
   const [selAlbum,setSelAlbum]=useState(null);
   const [viewUser,setViewUser]=useState({uid:"",username:""});
   const [showNotif,setShowNotif]=useState(false);
+  const [seeAll,setSeeAll]=useState(null); // {title, items, query}
   const [currentUser,setCurrentUser]=useState(null);
   const [profile,setProfile]=useState(null);
   const [records,setRecords]=useState({});
@@ -1469,6 +1660,7 @@ export default function App(){
   const goAlbum=al=>{setSelAlbum(al);setPage("album");};
   const goUser=(uid,username)=>{setViewUser({uid,username});setPage("user");};
   const showComingSoon=(title,message)=>setComingSoon({title,message});
+  const goSeeAll=(type,title,items,query)=>setSeeAll({type,title,items,query});
 
   const handleLogin=async()=>{
     const user=await getUser();
@@ -1505,22 +1697,27 @@ export default function App(){
       <style>{`
         ${CONFIG.fonts.import}
         *{box-sizing:border-box;margin:0;padding:0;}
+        html,body{height:100%;background:#000;}
         body{font-family:${CONFIG.fonts.family};}
         ::-webkit-scrollbar{display:none;}
         input,textarea{outline:none;border:none;font-family:${CONFIG.fonts.family};}
         @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-        .app-wrap{width:100%;max-width:480px;min-height:100vh;margin:0 auto;background:${t.bg};color:${t.tx};font-family:${CONFIG.fonts.family};transition:background 0.25s,color 0.25s;position:relative;}
-        @media(min-width:768px){.app-wrap{box-shadow:0 0 60px rgba(0,0,0,0.15);}}
+        .app-wrap{width:100%;max-width:480px;min-height:100vh;margin:0 auto;position:relative;overflow-x:hidden;}
+        @media(min-width:520px){.app-wrap{box-shadow:0 0 80px rgba(0,0,0,0.3);}}
       `}</style>
-      <div className="app-wrap">
-        {page==="landing"&&<LandingScreen t={t} dark={dark} setDark={setDark} onLogin={()=>setPage("login")} onSignup={()=>setPage("login")}/>}
+      <div className="app-wrap" style={{background:t.bg,color:t.tx,fontFamily:CONFIG.fonts.family,transition:"background 0.25s,color 0.25s"}}>
+        {seeAll&&(
+          <div style={{position:"fixed",inset:0,zIndex:500,background:t.bg,overflowY:"auto",maxWidth:480,margin:"0 auto"}}>
+            <SeeAllScreen t={t} title={seeAll.title} items={seeAll.items} query={seeAll.query} onBack={()=>setSeeAll(null)} onTrack={tr=>{setSeeAll(null);goTrack(tr);}}/>
+          </div>
+        )}        {page==="landing"&&<LandingScreen t={t} dark={dark} setDark={setDark} onLogin={()=>setPage("login")} onSignup={()=>setPage("login")}/>}
         {page==="login"&&<LoginScreen t={t} dark={dark} setDark={setDark} onLogin={handleLogin} onBack={()=>setPage("landing")}/>}
         {page==="app"&&(
           <>
             <div style={{paddingBottom:76,animation:"fadeUp 0.2s ease",minHeight:"100vh"}}>
-              {nav==="home"&&<HomeScreen t={t} dark={dark} setDark={setDark} onTrack={goTrack} onAlbum={goAlbum} onSub={()=>setPage("sub")} records={records} onNotif={()=>setShowNotif(!showNotif)} hasNotif={hasNotif}/>}
+              {nav==="home"&&<HomeScreen t={t} dark={dark} setDark={setDark} onTrack={goTrack} onAlbum={goAlbum} onSub={()=>setPage("sub")} records={records} onNotif={()=>setShowNotif(!showNotif)} hasNotif={hasNotif} onSeeAll={goSeeAll}/>}
               {nav==="feed"&&<FeedScreen t={t} onTrack={goTrack} onUser={goUser} onMore={tr=>{setSelTrack(tr);setModal("more");}} feedItems={feedItems}/>}
-              {nav==="search"&&<SearchScreen t={t} onTrack={goTrack} records={records}/>}
+              {nav==="search"&&<SearchScreen t={t} onTrack={goTrack} records={records} onSeeAll={goSeeAll}/>}
               {nav==="archive"&&<ArchiveScreen t={t} onTrack={goTrack} records={records} lists={lists} trackLists={trackLists} onCreateList={handleCreateList}/>}
               {nav==="profile"&&<MyProfileScreen t={t} dark={dark} setDark={setDark} onSettings={()=>setPage("settings")} onSub={()=>setPage("sub")} records={records} lists={lists} onTrack={goTrack} onReport={()=>setPage("report")} profile={profile}/>}
             </div>
