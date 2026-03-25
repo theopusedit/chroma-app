@@ -534,22 +534,22 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
 
   useEffect(()=>{
     // 글로벌 차트 (Apple RSS US)
-    Promise.all([
-      getChart("us", 10),
-      getNewReleases(8, "KR"),
-    ]).then(([top,releases])=>{
+    getChart("us", 10).then(top=>{
       setTrending(top);
       setChartTracks(top.slice(0,8));
       if(top[0]) setTodayPick(top[0]);
-      setNewAlbums(releases);
       setLoading(false);
     }).catch(()=>setLoading(false));
 
-    // 시대별 기본 (20s)
-    searchMusic("year:2020-2025","US").then(d=>{
-      const sorted=[...d.tracks].sort((a,b)=>(b.popularity||0)-(a.popularity||0));
-      setEraTracks(sorted.slice(0,25));
-    }).catch(()=>{});
+    // 최신 앨범 (Spotify) - 독립적으로 로드
+    getNewReleases(8,"KR").then(releases=>{
+      if(releases.length>0){ setNewAlbums(releases); return; }
+      return getNewReleases(8,"US").then(r=>{ if(r.length>0) setNewAlbums(r); });
+    }).catch(()=>{
+      searchMusic("new release 2025","US").then(d=>{
+        if(d.albums.length>0) setNewAlbums(d.albums.slice(0,8));
+      }).catch(()=>{});
+    });
   },[]);
 
   // 차트 탭 변경시
@@ -557,21 +557,13 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
     getChart(chart, 8).then(d=>setChartTracks(d)).catch(()=>{});
   },[chart]);
 
-  // 시대별 변경시
+  // 시대별 변경시 + 초기 로드
   useEffect(()=>{
     searchMusic(eraQueries[era],"US").then(d=>{
       const sorted=[...d.tracks].sort((a,b)=>(b.popularity||0)-(a.popularity||0));
       setEraTracks(sorted.slice(0,25));
     }).catch(()=>{});
   },[era]);
-
-  // 기본 시대별 (20s)
-  useEffect(()=>{
-    searchMusic(eraQueries["20s"],"US").then(d=>{
-      const sorted=[...d.tracks].sort((a,b)=>(b.popularity||0)-(a.popularity||0));
-      setEraTracks(sorted.slice(0,25));
-    }).catch(()=>{});
-  },[]);
 
   // 개인 맞춤 추천
   useEffect(()=>{
@@ -1873,34 +1865,45 @@ function GenreScreen({t,genreName,genreKey,onBack,onTrack,onArtist}){
   const [tracks,setTracks]=useState([]);
   const [artists,setArtists]=useState([]);
   const [loading,setLoading]=useState(true);
+  const [error,setError]=useState(false);
   const [topTrack,setTopTrack]=useState(null);
 
   useEffect(()=>{
+    if(!genreKey){
+      console.error("GenreScreen: genreKey is undefined!");
+      setError(true);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
+    setError(false);
+    setTracks([]);
     const cfg=GENRE_SEARCH[genreKey]||{q:genreKey,market:"US"};
-    Promise.all([
-      searchMusic(cfg.q, cfg.market),
-      searchMusic(cfg.q+" popular", cfg.market),
-    ]).then(([r1,r2])=>{
-      const seen=new Set();
-      const merged=[];
-      [...(r1.tracks||[]),...(r2.tracks||[])].forEach(tr=>{
-        const key=`${tr.t}-${tr.ar}`;
-        if(!seen.has(key)){seen.add(key);merged.push(tr);}
-      });
-      const sorted=merged.sort((a,b)=>(b.popularity||0)-(a.popularity||0));
-      setTracks(sorted.slice(0,25));
+    console.log("GenreScreen loading:", genreKey, cfg);
+    searchMusic(cfg.q, cfg.market).then(r1=>{
+      console.log("GenreScreen result:", r1.tracks?.length, "tracks");
+      const trs=r1.tracks||[];
+      if(trs.length===0){
+        setError(true);
+        setLoading(false);
+        return;
+      }
+      const sorted=[...trs].sort((a,b)=>(b.popularity||0)-(a.popularity||0));
+      setTracks(sorted);
       if(sorted[0]) setTopTrack(sorted[0]);
-      // 아티스트 추출 (중복 제거)
       const arMap=new Map();
-      merged.forEach(tr=>{
+      sorted.forEach(tr=>{
         if(tr.ar&&!arMap.has(tr.ar)){
           arMap.set(tr.ar,{id:tr.spotifyId||tr.id,spotifyId:tr.spotifyId,name:tr.ar,coverUrl:tr.coverUrl||""});
         }
       });
       setArtists(Array.from(arMap.values()).slice(0,6));
       setLoading(false);
-    }).catch(()=>setLoading(false));
+    }).catch(e=>{
+      console.error("GenreScreen error:", e);
+      setError(true);
+      setLoading(false);
+    });
   },[genreKey]);
 
   return(
@@ -1925,6 +1928,10 @@ function GenreScreen({t,genreName,genreKey,onBack,onTrack,onArtist}){
       </div>
 
       {loading&&<div style={{padding:"48px 20px",textAlign:"center",color:t.tx3,fontSize:13}}>불러오는 중...</div>}
+      {!loading&&error&&<div style={{padding:"48px 20px",textAlign:"center",color:t.tx3,fontSize:13}}>
+        곡을 불러올 수 없어요 😥<br/>
+        <span style={{fontSize:11,marginTop:6,display:"block"}}>잠시 후 다시 시도해주세요</span>
+      </div>}
 
       {/* 인기 차트 */}
       {tracks.length>0&&(
@@ -2163,6 +2170,8 @@ export default function App(){
   const [showNotif,setShowNotif]=useState(false);
   const [seeAll,setSeeAll]=useState(null);
   const [genre,setGenre]=useState(null);
+  const [genreKey,setGenreKey]=useState("");
+  const [genreName,setGenreName]=useState("");
   const [currentUser,setCurrentUser]=useState(null);
   const [profile,setProfile]=useState(null);
   const [records,setRecords]=useState({});
@@ -2208,8 +2217,8 @@ export default function App(){
   const goArtist=ar=>{setSelArtist(ar);setPage("artist");};
   const goUser=(uid,username)=>{setViewUser({uid,username});setPage("user");};
   const showComingSoon=(title,message)=>setComingSoon({title,message});
-  const goSeeAll=(type,title,items,query)=>setSeeAll({type,title,items,query});
-  const goGenre=(name,key)=>setGenre({name,key});
+  const goSeeAll=(type,title,items,query)=>{setSeeAll({type,title,items,query});setPage("seeall");};
+  const goGenre=(name,key)=>{setGenre({name,key});setGenreKey(key);setGenreName(name);setPage("genre");};
 
   const handleLogin=async()=>{
     const user=await getUser();
@@ -2255,34 +2264,6 @@ export default function App(){
         @media(min-width:520px){.app-wrap{box-shadow:0 0 80px rgba(0,0,0,0.15);}}
       `}</style>
       <div className="app-wrap" style={{background:t.bg,color:t.tx,fontFamily:CONFIG.fonts.family,transition:"background 0.25s,color 0.25s"}}>
-        {genre&&(
-          <div style={{position:"fixed",inset:0,zIndex:500,background:t.bg,maxWidth:480,margin:"0 auto",display:"flex",flexDirection:"column",overflow:"hidden"}}>
-            <div style={{flex:1,overflowY:"auto",paddingBottom:76}}>
-              <GenreScreen t={t} genreName={genre.name} genreKey={genre.key} onBack={()=>setGenre(null)} onTrack={tr=>{setGenre(null);goTrack(tr);}} onArtist={ar=>{setGenre(null);goArtist(ar);}}/>
-            </div>
-            <div style={{position:"absolute",bottom:0,left:0,right:0,zIndex:600}}>
-              <BottomNav t={t} nav={nav} setNav={v=>{
-                setGenre(null);
-                if(v===nav){setPage("app");}
-                else{setNav(v);setPage("app");}
-              }}/>
-            </div>
-          </div>
-        )}
-        {seeAll&&(
-          <div style={{position:"fixed",inset:0,zIndex:500,background:t.bg,maxWidth:480,margin:"0 auto",display:"flex",flexDirection:"column",overflow:"hidden"}}>
-            <div style={{flex:1,overflowY:"auto",paddingBottom:76}}>
-              <SeeAllScreen t={t} title={seeAll.title} items={seeAll.items} query={seeAll.query} onBack={()=>setSeeAll(null)} onTrack={tr=>{setSeeAll(null);goTrack(tr);}}/>
-            </div>
-            <div style={{position:"absolute",bottom:0,left:0,right:0,zIndex:600}}>
-              <BottomNav t={t} nav={nav} setNav={v=>{
-                setSeeAll(null);
-                if(v===nav){setPage("app");}
-                else{setNav(v);setPage("app");}
-              }}/>
-            </div>
-          </div>
-        )}
         {page==="landing"&&<LandingScreen t={t} dark={dark} setDark={setDark} onLogin={()=>setPage("login")} onSignup={()=>setPage("login")}/>}
         {page==="login"&&<LoginScreen t={t} dark={dark} setDark={setDark} onLogin={handleLogin} onBack={()=>setPage("landing")}/>}
         {page==="app"&&(
@@ -2296,6 +2277,22 @@ export default function App(){
             </div>
             <BottomNav t={t} nav={nav} setNav={setNav}/>
             {showNotif&&<NotifPanel t={t} onClose={()=>setShowNotif(false)}/>}
+          </>
+        )}
+        {page==="genre"&&genreKey&&(
+          <>
+            <div style={{paddingBottom:76,minHeight:"100vh"}}>
+              <GenreScreen t={t} genreName={genreName} genreKey={genreKey} onBack={()=>setPage("app")} onTrack={goTrack} onArtist={goArtist}/>
+            </div>
+            <BottomNav t={t} nav={nav} setNav={v=>{setNav(v);setPage("app");}}/>
+          </>
+        )}
+        {page==="seeall"&&(
+          <>
+            <div style={{paddingBottom:76,minHeight:"100vh"}}>
+              <SeeAllScreen t={t} title={seeAll?.title} items={seeAll?.items||[]} query={seeAll?.query} onBack={()=>setPage("app")} onTrack={goTrack}/>
+            </div>
+            <BottomNav t={t} nav={nav} setNav={v=>{setNav(v);setPage("app");}}/>
           </>
         )}
         {page==="track"&&<TrackScreen t={t} track={selTrack} onBack={()=>setPage("app")} onRecord={tr=>{setSelTrack(tr);setModal("record");}} onListModal={tr=>{setSelTrack(tr);setModal("list");}} onMore={tr=>{setSelTrack(tr);setModal("more");}} onAlbum={goAlbum} onSimilar={tr=>{setSelTrack(tr);window.scrollTo(0,0);}} records={records} trackLists={trackLists} lists={lists}/>}
