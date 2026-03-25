@@ -1,42 +1,43 @@
-// src/music.js — Spotify API (Client Credentials 호환)
-const SP = "/api/spotify";
+// src/music.js — Apple RSS(차트) + Spotify(나머지) 통합
 
-async function sp(params) {
-  const url = SP + "?" + new URLSearchParams(params).toString();
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Spotify ${res.status}`);
+// ── Apple RSS 차트 ────────────────────────────────────────────
+async function rss(country, limit, type = "songs") {
+  const res = await fetch(`/api/music?country=${country}&limit=${limit}&type=${type}`);
+  if (!res.ok) throw new Error("RSS 오류");
   return res.json();
 }
 
-// ── 장르별 인기곡 (검색 기반) ─────────────────────────────────
-const GENRE_QUERIES = {
-  global:  { q: "year:2024-2025",           market: "US" },
-  kr:      { q: "genre:k-pop year:2024-2025", market: "KR" },
-  pop:     { q: "genre:pop year:2024-2025",   market: "US" },
-  kpop:    { q: "genre:k-pop",               market: "KR" },
-  indie:   { q: "genre:indie-pop",           market: "US" },
-  hiphop:  { q: "genre:hip-hop",             market: "US" },
-  rnb:     { q: "genre:r-n-b",               market: "US" },
-  jazz:    { q: "genre:jazz",                market: "US" },
-  dance:   { q: "genre:dance",               market: "US" },
-  jpop:    { q: "genre:j-pop",               market: "JP" },
-  ost:     { q: "genre:soundtrack",          market: "US" },
-  classic: { q: "genre:classical",           market: "US" },
-};
-
-export async function getChart(chartKey = "global", limit = 25) {
-  const cfg = GENRE_QUERIES[chartKey] || GENRE_QUERIES.global;
-  const data = await sp({ type: "search", q: cfg.q, market: cfg.market, limit });
-  return (data.tracks?.items || []).map(formatTrack);
+// ── Spotify API ───────────────────────────────────────────────
+async function sp(params) {
+  const url = "/api/spotify?" + new URLSearchParams(params).toString();
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Spotify 오류");
+  return res.json();
 }
 
-// ── 최신 신보 ─────────────────────────────────────────────────
+// ── 차트 (Apple RSS 실시간) ───────────────────────────────────
+// country: "us"=글로벌, "kr"=한국, "jp"=일본
+export async function getChart(country = "us", limit = 25) {
+  const data = await rss(country, limit, "songs");
+  return (data.feed?.results || []).map(formatRssTrack);
+}
+
+// ── 최신 앨범 (Spotify) ───────────────────────────────────────
 export async function getNewReleases(limit = 10, country = "KR") {
   const data = await sp({ type: "new-releases", country, limit });
   return (data.albums?.items || []).map(formatAlbum);
 }
 
-// ── 검색 ──────────────────────────────────────────────────────
+// ── 개인 맞춤 추천 (Spotify) ──────────────────────────────────
+// trackIds: 사용자가 기록한 Spotify 트랙 ID 배열 (최대 5개)
+export async function getPersonalRecommendations(trackIds, limit = 20) {
+  if (!trackIds?.length) return [];
+  const seeds = trackIds.slice(0, 5).join(",");
+  const data = await sp({ type: "recommendations", id: seeds, limit });
+  return (data.tracks || []).map(formatTrack);
+}
+
+// ── 검색 (Spotify) ────────────────────────────────────────────
 export async function searchMusic(query, market = "KR") {
   const data = await sp({ type: "search", q: query, market, limit: 15 });
   return {
@@ -46,32 +47,28 @@ export async function searchMusic(query, market = "KR") {
   };
 }
 
-// ── 앨범 수록곡 ───────────────────────────────────────────────
+// ── 앨범 수록곡 (Spotify) ─────────────────────────────────────
 export async function getAlbumTracks(albumId) {
   const data = await sp({ type: "album", id: albumId });
   const tracks = (data.tracks?.items || []).map(tr => ({
     id: tr.id, spotifyId: tr.id,
-    t: tr.name, ar: tr.artists?.map(a=>a.name).join(", ")||"",
-    al: data.name||"",
+    t: tr.name,
+    ar: tr.artists?.map(a => a.name).join(", ") || "",
+    al: data.name || "",
     yr: data.release_date ? parseInt(data.release_date.slice(0,4)) : null,
-    coverUrl: data.images?.[0]?.url||"",
-    coverSmUrl: data.images?.[2]?.url||"",
+    coverUrl: data.images?.[0]?.url || "",
     dur: msToTime(tr.duration_ms),
-    genre:"", bpm:null, type:"album_track",
+    genre: "", bpm: null, type: "album_track",
     trackNumber: tr.track_number,
-    spotifyUrl: tr.external_urls?.spotify||"",
-    rec:0, rt:0, g:0,
+    spotifyId: tr.id,
+    collectionId: data.id,
+    spotifyUrl: tr.external_urls?.spotify || "",
+    rec: 0, rt: 0, g: 0,
   }));
   return { ...formatAlbum(data), trackList: tracks };
 }
 
-// ── 비슷한 곡 ─────────────────────────────────────────────────
-export async function getRecommendations(trackId, limit = 10) {
-  const data = await sp({ type: "recommendations", id: trackId, limit });
-  return (data.tracks || []).map(formatTrack);
-}
-
-// ── BPM 포함 곡 정보 ──────────────────────────────────────────
+// ── BPM 포함 곡 정보 (Spotify) ───────────────────────────────
 export async function getTrackWithFeatures(trackId) {
   const [track, features] = await Promise.all([
     sp({ type: "track", id: trackId }),
@@ -81,7 +78,56 @@ export async function getTrackWithFeatures(trackId) {
     ...formatTrack(track),
     bpm: features.tempo ? Math.round(features.tempo) : null,
     energy: features.energy ? Math.round(features.energy * 100) : null,
+    danceability: features.danceability ? Math.round(features.danceability * 100) : null,
   };
+}
+
+// ── 비슷한 곡 추천 (Spotify) ──────────────────────────────────
+export async function getRecommendations(trackId, limit = 10) {
+  const data = await sp({ type: "recommendations", id: trackId, limit });
+  return (data.tracks || []).map(formatTrack);
+}
+
+// ── 아티스트 정보 (Spotify) ───────────────────────────────────
+export async function getArtistInfo(artistId) {
+  const [artist, tracks, albums, related] = await Promise.all([
+    sp({ type: "artist", id: artistId }),
+    sp({ type: "artist-tracks", id: artistId }),
+    sp({ type: "artist-albums", id: artistId }),
+    sp({ type: "related-artists", id: artistId }).catch(() => ({ artists: [] })),
+  ]);
+  return {
+    ...formatArtist(artist),
+    topTracks: (tracks.tracks || []).map(formatTrack),
+    albums: (albums.items || []).map(formatAlbum),
+    related: (related.artists || []).slice(0, 6).map(formatArtist),
+  };
+}
+
+// ── 장르 인기곡 (Spotify) ─────────────────────────────────────
+const GENRE_MAP = {
+  kpop:    { q: "genre:k-pop",      market: "KR" },
+  jpop:    { q: "genre:j-pop",      market: "JP" },
+  pop:     { q: "genre:pop",        market: "US" },
+  indie:   { q: "genre:indie-pop",  market: "US" },
+  hiphop:  { q: "genre:hip-hop",    market: "US" },
+  rnb:     { q: "genre:r-n-b",      market: "US" },
+  jazz:    { q: "genre:jazz",       market: "US" },
+  dance:   { q: "genre:dance",      market: "US" },
+  ost:     { q: "genre:soundtrack", market: "US" },
+  classic: { q: "genre:classical",  market: "US" },
+};
+
+export async function getGenreTracks(genreKey, limit = 20) {
+  const cfg = GENRE_MAP[genreKey] || { q: genreKey, market: "KR" };
+  const data = await sp({ type: "search", q: cfg.q, market: cfg.market, limit });
+  return (data.tracks?.items || []).map(formatTrack);
+}
+
+export async function getGenreArtists(genreKey, limit = 6) {
+  const cfg = GENRE_MAP[genreKey] || { q: genreKey, market: "KR" };
+  const data = await sp({ type: "search", q: cfg.q + " artist", market: cfg.market, limit });
+  return (data.artists?.items || []).map(formatArtist);
 }
 
 // ── 스트리밍 링크 ─────────────────────────────────────────────
@@ -95,7 +141,26 @@ export function getStreamingLinks(track) {
   ];
 }
 
-// ── 포맷 ──────────────────────────────────────────────────────
+// ── RSS 포맷 ──────────────────────────────────────────────────
+function formatRssTrack(item) {
+  return {
+    id: String(item.id || Math.random()),
+    spotifyId: null,
+    t: item.name || "",
+    ar: item.artistName || "",
+    al: item.albumName || "",
+    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0,4)) : null,
+    coverUrl: item.artworkUrl100?.replace("100x100bb","600x600bb") || "",
+    coverSmUrl: item.artworkUrl100 || "",
+    itunesUrl: item.url || "",
+    spotifyUrl: "",
+    dur: "", genre: item.genreName || "",
+    bpm: null, type: "album_track",
+    rec: 0, rt: 0, g: 0,
+  };
+}
+
+// ── Spotify 포맷 ──────────────────────────────────────────────
 export function formatTrack(item) {
   if (!item) return null;
   return {
@@ -103,18 +168,19 @@ export function formatTrack(item) {
     spotifyId: item.id,
     collectionId: item.album?.id,
     t: item.name || "",
-    ar: item.artists?.map(a=>a.name).join(", ") || "",
+    ar: item.artists?.map(a => a.name).join(", ") || "",
     al: item.album?.name || "",
     yr: item.album?.release_date ? parseInt(item.album.release_date.slice(0,4)) : null,
     coverUrl: item.album?.images?.[0]?.url || "",
     coverSmUrl: item.album?.images?.[2]?.url || "",
     spotifyUrl: item.external_urls?.spotify || "",
+    itunesUrl: "",
     dur: msToTime(item.duration_ms || 0),
     genre: "", bpm: null,
     popularity: item.popularity || 0,
     type: item.album?.album_type === "single" ? "싱글" : "앨범 수록곡",
     altype: item.album?.album_type || "앨범",
-    rec:0, rt:0, g:0,
+    rec: 0, rt: 0, g: 0,
   };
 }
 
@@ -124,7 +190,7 @@ export function formatAlbum(item) {
     id: item.id || String(Math.random()),
     spotifyId: item.id,
     t: item.name || "",
-    ar: item.artists?.map(a=>a.name).join(", ") || "",
+    ar: item.artists?.map(a => a.name).join(", ") || "",
     yr: item.release_date ? parseInt(item.release_date.slice(0,4)) : null,
     coverUrl: item.images?.[0]?.url || "",
     coverSmUrl: item.images?.[2]?.url || "",
@@ -133,8 +199,8 @@ export function formatAlbum(item) {
     label: item.label || "",
     genre: item.genres?.join(", ") || "",
     tracks: item.total_tracks || 0,
-    dur:"", trackList:[],
-    rec:0, rt:0, g:0,
+    dur: "", trackList: [],
+    rec: 0, rt: 0, g: 0,
   };
 }
 
@@ -142,10 +208,13 @@ export function formatArtist(item) {
   if (!item) return null;
   return {
     id: item.id,
+    spotifyId: item.id,
     name: item.name || "",
     coverUrl: item.images?.[0]?.url || "",
+    coverSmUrl: item.images?.[2]?.url || "",
     genres: item.genres || [],
     popularity: item.popularity || 0,
+    followers: item.followers?.total || 0,
     spotifyUrl: item.external_urls?.spotify || "",
   };
 }

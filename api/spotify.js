@@ -1,10 +1,7 @@
-// api/spotify.js — Vercel 서버리스 함수
+// api/spotify.js — Spotify API 프록시
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET");
-
   const { type, q, id, market = "KR", limit = 20, country = "KR" } = req.query;
-
   try {
     const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
       method: "POST",
@@ -18,8 +15,8 @@ export default async function handler(req, res) {
     });
     const { access_token } = await tokenRes.json();
     const h = { Authorization: `Bearer ${access_token}` };
-
     let url = "";
+
     if (type === "search") {
       url = `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track,album,artist&market=${market}&limit=${limit}`;
     } else if (type === "track") {
@@ -28,27 +25,20 @@ export default async function handler(req, res) {
       url = `https://api.spotify.com/v1/audio-features/${id}`;
     } else if (type === "album") {
       url = `https://api.spotify.com/v1/albums/${id}?market=${market}`;
+    } else if (type === "artist") {
+      url = `https://api.spotify.com/v1/artists/${id}`;
     } else if (type === "artist-tracks") {
       url = `https://api.spotify.com/v1/artists/${id}/top-tracks?market=${market}`;
+    } else if (type === "artist-albums") {
+      url = `https://api.spotify.com/v1/artists/${id}/albums?market=${market}&limit=10&include_groups=album,single`;
+    } else if (type === "related-artists") {
+      url = `https://api.spotify.com/v1/artists/${id}/related-artists`;
     } else if (type === "recommendations") {
       url = `https://api.spotify.com/v1/recommendations?seed_tracks=${id}&market=${market}&limit=${limit}`;
+    } else if (type === "recommendations-by-artists") {
+      url = `https://api.spotify.com/v1/recommendations?seed_artists=${id}&market=${market}&limit=${limit}`;
     } else if (type === "new-releases") {
       url = `https://api.spotify.com/v1/browse/new-releases?country=${country}&limit=${limit}`;
-    } else if (type === "category-playlists") {
-      url = `https://api.spotify.com/v1/browse/categories/${id}/playlists?country=${country}&limit=${limit}`;
-    } else if (type === "playlist-tracks") {
-      url = `https://api.spotify.com/v1/playlists/${id}/tracks?market=${market}&limit=50`;
-    } else if (type === "charts") {
-      // Global Top 50: 37i9dQZEVXbMDoHDwVN2tF
-      // Korea Top 50:  37i9dQZEVXbNxXF4SkHj9F
-      // Pop:           37i9dQZF1DXarRysLJmuju
-      // K-Pop:         37i9dQZF1DX9tPFwDMOaN1
-      // Hip-Hop:       37i9dQZF1DX0XUsuxWHRQd
-      // Indie:         37i9dQZF1DX2sUQwD7tbmL
-      // R&B:           37i9dQZF1DX4SBhb3fqCJd
-      // Jazz:          37i9dQZF1DXbITWG1ZJKYt
-      const playlistId = id || "37i9dQZEVXbMDoHDwVN2tF";
-      url = `https://api.spotify.com/v1/playlists/${playlistId}/tracks?market=${market}&limit=50`;
     } else {
       return res.status(400).json({ error: "Unknown type" });
     }
