@@ -10,21 +10,26 @@ async function apiFetch(url) {
 
 // ── 실시간 차트 (Apple Music 한국 인기순) ─────────────────────
 export async function getTopChart(limit = 25) {
-  const data = await apiFetch(`${RSS}/most-played/${limit}/songs.json`);
-  return (data.feed?.results || []).map(formatRssTrack);
+  try {
+    const data = await apiFetch(`${RSS}/most-played/${limit}/songs.json`);
+    const results = (data.feed?.results || []).map(formatRssTrack);
+    if (results.length > 0) return results;
+  } catch(e) {}
+  // fallback: iTunes 검색 (연도 없이 — 최신순으로 나옴)
+  const data = await apiFetch(`${ITUNES}/search?term=kpop&country=KR&media=music&entity=song&limit=${limit}&sort=recent`);
+  return (data.results || []).map(formatTrack);
 }
 
 // ── 최신 발매 앨범 (한국 신보) ────────────────────────────────
 export async function getNewReleases(limit = 10) {
-  const data = await apiFetch(`${RSS}/new-releases/${limit}/albums.json`);
-  return (data.feed?.results || []).map(formatRssAlbum);
-}
-
-// ── 장르별 차트 ────────────────────────────────────────────────
-// genreId: 6004=Pop, 6005=Rock, 6015=R&B, 6012=Electronic
-export async function getGenreChart(genreId, limit = 25) {
-  const data = await apiFetch(`${RSS}/most-played/${limit}/songs.json?genre=${genreId}`);
-  return (data.feed?.results || []).map(formatRssTrack);
+  try {
+    const data = await apiFetch(`${RSS}/new-releases/${limit}/albums.json`);
+    const results = (data.feed?.results || []).map(formatRssAlbum);
+    if (results.length > 0) return results;
+  } catch(e) {}
+  // fallback
+  const data = await apiFetch(`${ITUNES}/search?term=kpop&country=KR&media=music&entity=album&limit=${limit}&sort=recent`);
+  return (data.results || []).map(formatAlbum);
 }
 
 // ── 검색 ──────────────────────────────────────────────────────
@@ -63,22 +68,20 @@ export function getStreamingLinks(track) {
   ];
 }
 
-// ── RSS 포맷 변환 (Apple Music RSS) ──────────────────────────
+// ── RSS 포맷 ──────────────────────────────────────────────────
 function formatRssTrack(item) {
   return {
     id: String(item.id || Math.random()),
     itunesId: item.id,
     t: item.name || "",
     ar: item.artistName || "",
-    al: item.albumName || item.collectionName || "",
-    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0, 4)) : null,
-    coverUrl: item.artworkUrl100?.replace("100x100bb", "400x400bb") || "",
+    al: item.albumName || "",
+    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0,4)) : null,
+    coverUrl: item.artworkUrl100?.replace("100x100bb","400x400bb") || "",
     coverSmUrl: item.artworkUrl100 || "",
     itunesUrl: item.url || "",
-    dur: "",
-    genre: item.genreName || "",
-    bpm: null,
-    type: "album_track",
+    dur: "", genre: item.genreName || "",
+    bpm: null, type: "album_track",
     rec: 0, rt: 0, g: 0,
   };
 }
@@ -89,20 +92,18 @@ function formatRssAlbum(item) {
     itunesId: item.id,
     t: item.name || "",
     ar: item.artistName || "",
-    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0, 4)) : null,
-    coverUrl: item.artworkUrl100?.replace("100x100bb", "400x400bb") || "",
+    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0,4)) : null,
+    coverUrl: item.artworkUrl100?.replace("100x100bb","400x400bb") || "",
     coverSmUrl: item.artworkUrl100 || "",
     itunesUrl: item.url || "",
-    altype: "앨범",
-    label: "",
+    altype: "앨범", label: "",
     genre: item.genreName || "",
-    tracks: 0,
-    dur: "", trackList: [],
+    tracks: 0, dur: "", trackList: [],
     rec: 0, rt: 0, g: 0,
   };
 }
 
-// ── iTunes Search 포맷 변환 ───────────────────────────────────
+// ── iTunes 포맷 ───────────────────────────────────────────────
 export function formatTrack(item) {
   if (!item) return null;
   return {
@@ -112,8 +113,8 @@ export function formatTrack(item) {
     t: item.trackName || item.collectionName || "",
     ar: item.artistName || "",
     al: item.collectionName || "",
-    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0, 4)) : null,
-    coverUrl: item.artworkUrl100?.replace("100x100bb", "400x400bb") || "",
+    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0,4)) : null,
+    coverUrl: item.artworkUrl100?.replace("100x100bb","400x400bb") || "",
     coverSmUrl: item.artworkUrl100 || "",
     itunesUrl: item.trackViewUrl || item.collectionViewUrl || "",
     dur: msToTime(item.trackTimeMillis || 0),
@@ -132,8 +133,8 @@ export function formatAlbum(item) {
     itunesId: item.collectionId,
     t: item.collectionName || "",
     ar: item.artistName || "",
-    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0, 4)) : null,
-    coverUrl: item.artworkUrl100?.replace("100x100bb", "400x400bb") || "",
+    yr: item.releaseDate ? parseInt(item.releaseDate.slice(0,4)) : null,
+    coverUrl: item.artworkUrl100?.replace("100x100bb","400x400bb") || "",
     coverSmUrl: item.artworkUrl100 || "",
     itunesUrl: item.collectionViewUrl || "",
     altype: item.collectionType || "앨범",
@@ -148,6 +149,6 @@ export function formatAlbum(item) {
 function msToTime(ms) {
   if (!ms) return "";
   const min = Math.floor(ms / 60000);
-  const sec = Math.floor((ms % 60000) / 1000).toString().padStart(2, "0");
+  const sec = Math.floor((ms % 60000) / 1000).toString().padStart(2,"0");
   return `${min}:${sec}`;
 }

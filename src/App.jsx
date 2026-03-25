@@ -519,7 +519,7 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
   const [chartTracks,setChartTracks]=useState([]);
   const [eraTracks,setEraTracks]=useState([]);
   const [loading,setLoading]=useState(true);
-  const pick=CONFIG.home.todayPick;
+  const [todayPick,setTodayPick]=useState(null);
 
   // iTunes 장르 ID
   const chartGenreIds={"global":null,"kr":1,"pop":14,"indie":1010};
@@ -534,7 +534,6 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
   const chartLabels={"global":"🌍 전체","kr":"🇰🇷 한국","pop":"팝","indie":"인디"};
 
   useEffect(()=>{
-    // RSS API로 실시간 데이터 로드
     Promise.all([
       getTopChart(10),
       getNewReleases(8),
@@ -542,18 +541,18 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
       setTrending(top);
       setNewAlbums(releases);
       setChartTracks(top.slice(0,8));
+      if(top[0]) setTodayPick(top[0]); // 차트 1위 = 오늘의 추천
       setLoading(false);
     }).catch(()=>{
-      // RSS 실패시 iTunes 검색으로 fallback
-      searchMusic("kpop 2024").then(d=>{
+      searchMusic("kpop").then(d=>{
         setTrending(d.tracks.slice(0,10));
         setNewAlbums(d.albums.slice(0,8));
         setChartTracks(d.tracks.slice(0,8));
+        if(d.tracks[0]) setTodayPick(d.tracks[0]);
         setLoading(false);
       }).catch(()=>setLoading(false));
     });
-    // 초기 시대별 로드 (20s = 최신)
-    searchMusic("2024 2025 kpop pop hits").then(d=>{
+    searchMusic("kpop pop hits").then(d=>{
       const sorted=[...d.tracks].sort((a,b)=>(b.yr||0)-(a.yr||0));
       setEraTracks(sorted.slice(0,25));
     }).catch(()=>{});
@@ -591,17 +590,25 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
       </div>
 
       {/* 히어로 배너 */}
-      <div style={{margin:"0 20px 32px",background:`linear-gradient(145deg,${GR[pick.gradientIndex][0]},${GR[5][1]})`,
-        borderRadius:22,padding:"26px 22px",position:"relative",overflow:"hidden",cursor:"pointer"}}>
-        <div style={{position:"absolute",right:-20,top:-20,fontSize:130,opacity:.05,lineHeight:1}}>♪</div>
-        <div style={{fontSize:11,letterSpacing:.15,textTransform:"uppercase",color:"rgba(255,255,255,0.45)",marginBottom:8,fontWeight:700}}>{pick.label}</div>
-        <div style={{fontSize:25,fontWeight:800,color:"#fff",marginBottom:3,letterSpacing:-.5}}>{pick.trackTitle}</div>
-        <div style={{fontSize:13,color:"rgba(255,255,255,0.5)",marginBottom:20}}>{pick.artist} · {pick.album} · {pick.year}</div>
-        <div style={{display:"flex",gap:8}}>
-          <div style={{background:"rgba(255,255,255,0.18)",backdropFilter:"blur(8px)",color:"#fff",padding:"9px 18px",borderRadius:10,fontSize:13,fontWeight:600,cursor:"pointer"}}>+ 기록하기</div>
-          <div style={{background:"rgba(255,255,255,0.09)",color:"rgba(255,255,255,0.7)",padding:"9px 18px",borderRadius:10,fontSize:13,cursor:"pointer"}}>자세히</div>
+      {todayPick&&(
+      <div style={{margin:"0 20px 32px",position:"relative",borderRadius:22,overflow:"hidden",cursor:"pointer",minHeight:140}}
+        onClick={()=>onTrack(todayPick)}>
+        {todayPick.coverUrl
+          ?<div style={{position:"absolute",inset:0,backgroundImage:`url(${todayPick.coverUrl})`,backgroundSize:"cover",backgroundPosition:"center",filter:"brightness(0.45)"}}/>
+          :<div style={{position:"absolute",inset:0,background:`linear-gradient(145deg,${GR[1][0]},${GR[5][1]})`}}/>}
+        <div style={{position:"absolute",inset:0,background:"linear-gradient(135deg,rgba(0,0,0,0.3),rgba(0,0,0,0.6))"}}/>
+        <div style={{position:"relative",zIndex:1,padding:"26px 22px"}}>
+          <div style={{fontSize:11,letterSpacing:.15,textTransform:"uppercase",color:"rgba(255,255,255,0.55)",marginBottom:8,fontWeight:700}}>🎵 오늘의 추천 · 실시간 1위</div>
+          <div style={{fontSize:24,fontWeight:800,color:"#fff",marginBottom:3,letterSpacing:-.5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{todayPick.t}</div>
+          <div style={{fontSize:13,color:"rgba(255,255,255,0.55)",marginBottom:20,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{todayPick.ar}{todayPick.yr?` · ${todayPick.yr}`:""}</div>
+          <div style={{display:"flex",gap:8}}>
+            <div style={{background:"rgba(255,255,255,0.2)",backdropFilter:"blur(8px)",color:"#fff",padding:"9px 18px",borderRadius:10,fontSize:13,fontWeight:600}}
+              onClick={e=>{e.stopPropagation();onTrack(todayPick);}}>+ 기록하기</div>
+            <div style={{background:"rgba(255,255,255,0.09)",color:"rgba(255,255,255,0.7)",padding:"9px 18px",borderRadius:10,fontSize:13}}>자세히 →</div>
+          </div>
         </div>
       </div>
+      )}
 
       {/* 지금 뜨는 곡 */}
       <Sec title="지금 뜨는 곡" t={t} action="전체보기" onAction={()=>onSeeAll("trending","지금 뜨는 곡",trending)}>
