@@ -525,17 +525,33 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
 
   useEffect(()=>{
     Promise.all([
-      getTopChart(10, "us"),    // 글로벌 차트
-      getNewReleases(8, "us"),  // 글로벌 최신 앨범
+      getTopChart(10,"us"),
+      getNewReleases(8,"us"),
     ]).then(([top,releases])=>{
       setTrending(top);
-      setNewAlbums(releases);
+      // 최신 앨범: RSS 결과가 있으면 사용, 없으면 검색으로 fallback
+      if(releases.length>0){
+        setNewAlbums(releases);
+      } else {
+        searchMusic("new album release","US").then(d=>setNewAlbums(d.albums.slice(0,8))).catch(()=>{});
+      }
       setChartTracks(top.slice(0,8));
       if(top[0]) setTodayPick(top[0]);
       setLoading(false);
-    }).catch(()=>setLoading(false));
-    // 초기 시대별 (20s 기본)
-    searchMusic("hits popular", "US").then(d=>{
+    }).catch(()=>{
+      // 전체 실패시 iTunes fallback
+      Promise.all([
+        searchMusic("top hits popular","US"),
+        searchMusic("new album","US"),
+      ]).then(([tr,al])=>{
+        setTrending(tr.tracks.slice(0,10));
+        setNewAlbums(al.albums.slice(0,8));
+        setChartTracks(tr.tracks.slice(0,8));
+        if(tr.tracks[0]) setTodayPick(tr.tracks[0]);
+        setLoading(false);
+      }).catch(()=>setLoading(false));
+    });
+    searchMusic("hits popular","US").then(d=>{
       const sorted=[...d.tracks].sort((a,b)=>(b.yr||0)-(a.yr||0));
       setEraTracks(sorted.slice(0,25));
     }).catch(()=>{});
@@ -617,7 +633,9 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
       </Sec>
 
       {/* 차트 */}
-      <Sec title="오늘의 차트" t={t} action="전체보기" onAction={()=>onSeeAll("chart","오늘의 차트",chartTracks,chartQueries[chart])}>
+      <Sec title="오늘의 차트" t={t} action="전체보기" onAction={()=>onSeeAll("chart","오늘의 차트",chartTracks,
+        chart==="global"?"__global_rss__":chart==="kr"?"__kr_rss__":chart==="pop"?"pop hits taylor swift ed sheeran":"indie folk alternative"
+      )}>
         <div style={{display:"flex",gap:8,padding:"0 20px",marginBottom:12,overflowX:"auto"}}>
           {Object.entries(chartLabels).map(([id,label])=>(
             <div key={id} style={{flexShrink:0,padding:"7px 16px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",
@@ -645,7 +663,11 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
       </Sec>
 
       {/* 시대별 명곡 */}
-      <Sec title="시대별 명곡" t={t} action="전체보기" onAction={()=>onSeeAll("era",`${era} 명곡`,eraTracks,eraQueries[era])}>
+      <Sec title="시대별 명곡" t={t} action="전체보기" onAction={()=>onSeeAll("era",`${era} 명곡`,eraTracks,{
+        "70s":"1970s classic rock disco hits","80s":"1980s pop rock new wave",
+        "90s":"1990s grunge alternative pop","00s":"2000s pop hits",
+        "10s":"2010s pop hits adele","20s":"2020s hits popular"
+      }[era])}>
         <div style={{display:"flex",gap:8,padding:"0 20px",marginBottom:16,overflowX:"auto"}}>
           {["70s","80s","90s","00s","10s","20s"].map(e=>(
             <div key={e} style={{flexShrink:0,padding:"7px 16px",borderRadius:20,fontSize:13,fontWeight:600,cursor:"pointer",
@@ -732,11 +754,11 @@ function FeedScreen({t,onTrack,onUser,onMore,feedItems}){
 }
 
 // ── SEARCH ────────────────────────────────────────────────────
-function SearchScreen({t,onTrack,records,onSeeAll,onGenre}){
+function SearchScreen({t,onTrack,onAlbum,records,onSeeAll,onGenre}){
   const [q,setQ]=useState("");
-  const [results,setResults]=useState({tracks:[],albums:[]});
+  const [results,setResults]=useState({tracks:[],albums:[],artists:[]});
   const [loading,setLoading]=useState(false);
-  const [searchTab,setSearchTab]=useState("all"); // all | tracks | albums
+  const [searchTab,setSearchTab]=useState("all");
   const [popularTracks,setPopularTracks]=useState([]);
   const [genreCovers,setGenreCovers]=useState({});
 
@@ -767,11 +789,27 @@ function SearchScreen({t,onTrack,records,onSeeAll,onGenre}){
   },[]);
 
   useEffect(()=>{
-    if(!q.trim()){setResults({tracks:[],albums:[]});setSearchTab("all");return;}
+    if(!q.trim()){setResults({tracks:[],albums:[],artists:[]});setSearchTab("all");return;}
     const timer=setTimeout(async()=>{
       setLoading(true);
-      try{ const d=await searchMusic(q); setResults(d); }
-      catch(e){ console.error(e); }
+      try{
+        const [trackAlbum,artistData]=await Promise.all([
+          searchMusic(q,"KR"),
+          searchMusic(q,"KR"),
+        ]);
+        // 아티스트: 동일 아티스트명 중복 제거
+        const artistMap=new Map();
+        [...trackAlbum.tracks,...trackAlbum.albums].forEach(item=>{
+          if(item.ar&&!artistMap.has(item.ar)){
+            artistMap.set(item.ar,{name:item.ar,coverUrl:item.coverUrl||""});
+          }
+        });
+        setResults({
+          tracks:trackAlbum.tracks,
+          albums:trackAlbum.albums,
+          artists:Array.from(artistMap.values()).slice(0,5),
+        });
+      }catch(e){console.error(e);}
       setLoading(false);
     },400);
     return()=>clearTimeout(timer);
@@ -795,18 +833,32 @@ function SearchScreen({t,onTrack,records,onSeeAll,onGenre}){
   );
 
   const albumItem=(al,i)=>(
-    <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 20px",cursor:"pointer",borderBottom:`1px solid ${t.bd}`}}>
-      <div style={{width:46,height:46,borderRadius:9,flexShrink:0,overflow:"hidden",
-        background:al.coverUrl?"#111":bg(i%8),
-        backgroundImage:al.coverUrl?`url(${al.coverUrl})`:"none",
-        backgroundSize:"cover",backgroundPosition:"center",
-        display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"rgba(255,255,255,0.3)"}}>
-        {!al.coverUrl&&"♪"}
+    <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 20px",cursor:"pointer",borderBottom:`1px solid ${t.bd}`}}
+      onClick={()=>onAlbum(al)}>
+      <div style={{width:46,height:46,borderRadius:9,flexShrink:0,overflow:"hidden",background:al.coverUrl?"#111":bg(i%8)}}>
+        {al.coverUrl?<img src={al.coverUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+        :<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"rgba(255,255,255,0.3)"}}>♪</div>}
       </div>
       <div style={{flex:1,minWidth:0}}>
         <div style={{fontSize:14,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx,textAlign:"left"}}>{al.t}</div>
         <div style={{fontSize:12,color:t.tx2,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textAlign:"left"}}>{al.ar} · {al.yr}</div>
       </div>
+      <span style={{color:t.tx3,fontSize:13,flexShrink:0}}>앨범 ›</span>
+    </div>
+  );
+
+  const artistItem=(ar,i)=>(
+    <div key={i} style={{display:"flex",alignItems:"center",gap:14,padding:"12px 20px",cursor:"pointer",borderBottom:`1px solid ${t.bd}`}}
+      onClick={()=>onSeeAll("artist",ar.name,[],ar.name)}>
+      <div style={{width:46,height:46,borderRadius:"50%",flexShrink:0,overflow:"hidden",background:bg(i%8)}}>
+        {ar.coverUrl?<img src={ar.coverUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+        :<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"rgba(255,255,255,0.3)"}}>🎤</div>}
+      </div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:14,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx,textAlign:"left"}}>{ar.name}</div>
+        <div style={{fontSize:12,color:t.tx2,marginTop:1,textAlign:"left"}}>아티스트</div>
+      </div>
+      <span style={{color:t.tx3,fontSize:16}}>›</span>
     </div>
   );
 
@@ -825,7 +877,7 @@ function SearchScreen({t,onTrack,records,onSeeAll,onGenre}){
         <div>
           {/* 탭 */}
           <div style={{display:"flex",gap:8,padding:"0 20px 12px",overflowX:"auto"}}>
-            {[["all","전체"],["tracks","곡"],["albums","앨범"]].map(([id,label])=>(
+            {[["all","전체"],["tracks","곡"],["albums","앨범"],["artists","아티스트"]].map(([id,label])=>(
               <div key={id} style={{flexShrink:0,padding:"6px 16px",borderRadius:20,fontSize:13,fontWeight:600,cursor:"pointer",
                 background:searchTab===id?C.primary:t.sf,
                 color:searchTab===id?"#fff":t.tx2,
@@ -836,6 +888,12 @@ function SearchScreen({t,onTrack,records,onSeeAll,onGenre}){
           {loading&&<div style={{padding:"24px 20px",textAlign:"center",color:t.tx3,fontSize:13}}>검색 중...</div>}
           {!loading&&(
             <>
+              {(searchTab==="all"||searchTab==="artists")&&results.artists?.length>0&&(
+                <>
+                  {searchTab==="all"&&<div style={{padding:"12px 20px 4px",fontSize:12,fontWeight:600,color:t.tx3,textTransform:"uppercase",letterSpacing:.1}}>아티스트</div>}
+                  {results.artists.map(artistItem)}
+                </>
+              )}
               {(searchTab==="all"||searchTab==="tracks")&&results.tracks.map(trackItem)}
               {(searchTab==="all"||searchTab==="albums")&&results.albums.map(albumItem)}
               {results.tracks.length===0&&results.albums.length===0&&(
@@ -985,7 +1043,7 @@ function ArchiveScreen({t,onTrack,records,lists,trackLists}){
 }
 
 // ── TRACK DETAIL ──────────────────────────────────────────────
-function TrackScreen({t,track,onBack,onRecord,onListModal,onMore,records,trackLists,lists}){
+function TrackScreen({t,track,onBack,onRecord,onListModal,onMore,onAlbum,records,trackLists,lists}){
   const tr=track||TRACKS[0];
   const trackId=String(tr.id||tr.itunesId||'');
   const existing=records[trackId];
@@ -1023,6 +1081,12 @@ function TrackScreen({t,track,onBack,onRecord,onListModal,onMore,records,trackLi
             <div style={{fontWeight:800,fontSize:26,color:"#fff",letterSpacing:-.5,lineHeight:1.2}}>{tr.t}</div>
             <div style={{fontSize:15,color:"rgba(255,255,255,0.6)",marginTop:6}}>{tr.ar}</div>
             <div style={{fontSize:12,color:"rgba(255,255,255,0.35)",marginTop:3}}>{typeLabel[tr.type]||"앨범 수록곡"} · {tr.al} · {tr.yr}</div>
+            {tr.al&&tr.collectionId&&(
+              <div style={{marginTop:8,display:"inline-block",padding:"5px 14px",background:"rgba(255,255,255,0.12)",borderRadius:20,fontSize:12,color:"rgba(255,255,255,0.7)",cursor:"pointer"}}
+                onClick={()=>onAlbum&&onAlbum({id:String(tr.collectionId),itunesId:tr.collectionId,t:tr.al,ar:tr.ar,coverUrl:tr.coverUrl,yr:tr.yr,altype:"앨범",genre:tr.genre||"",label:"",tracks:0,dur:"",rec:0,rt:0,g:0})}>
+                앨범 보기 →
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1774,29 +1838,34 @@ function GenreScreen({t,genreName,genreQuery,genreCountry,onBack,onTrack}){
 // ── 전체보기 화면 ─────────────────────────────────────────────
 function SeeAllScreen({t,title,items,onBack,onTrack,query}){
   const [tracks,setTracks]=useState(items||[]);
-  const [loading,setLoading]=useState(false);
+  const [loading,setLoading]=useState(!!query);
 
   useEffect(()=>{
-    if(query){
-      setLoading(true);
-      // 100개 로드를 위해 여러 번 검색
-      Promise.all([
-        searchMusic(query),
-        searchMusic(query+" popular"),
-        searchMusic(query+" hits"),
-      ]).then(results=>{
-        const all=[];
-        const seen=new Set();
-        results.forEach(d=>{
-          d.tracks.forEach(tr=>{
+    if(!query) return;
+    setLoading(true);
+    const load=async()=>{
+      try{
+        if(query==="__global_rss__"){
+          const d=await getTopChart(50,"us"); setTracks(d);
+        } else if(query==="__kr_rss__"){
+          const d=await getKrChart(50); setTracks(d);
+        } else {
+          const [r1,r2,r3]=await Promise.all([
+            searchMusic(query,"US"),
+            searchMusic(query+" hits","US"),
+            searchMusic(query+" popular","US"),
+          ]);
+          const all=[]; const seen=new Set();
+          [r1,r2,r3].forEach(d=>(d.tracks||[]).forEach(tr=>{
             const key=`${tr.t}-${tr.ar}`;
             if(!seen.has(key)){seen.add(key);all.push(tr);}
-          });
-        });
-        if(all.length>0) setTracks(all.slice(0,100));
-        setLoading(false);
-      }).catch(()=>setLoading(false));
-    }
+          }));
+          if(all.length>0) setTracks(all.slice(0,100));
+        }
+      }catch(e){console.error(e);}
+      setLoading(false);
+    };
+    load();
   },[]);
 
   return(
@@ -1809,17 +1878,14 @@ function SeeAllScreen({t,title,items,onBack,onTrack,query}){
       <div style={{padding:"8px 0"}}>
         {tracks.map((tr,i)=>(
           <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 20px",borderBottom:`1px solid ${t.bd}`,cursor:"pointer"}} onClick={()=>onTrack(tr)}>
-            <span style={{fontSize:14,fontWeight:700,color:i<3?C.primary:t.tx3,width:26,flexShrink:0,textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{i+1}</span>
-            <div style={{width:48,height:48,borderRadius:10,flexShrink:0,overflow:"hidden",
-              background:tr.coverUrl?"#111":bg(i%8),
-              backgroundImage:tr.coverUrl?`url(${tr.coverUrl})`:"none",
-              backgroundSize:"cover",backgroundPosition:"center",
-              display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"rgba(255,255,255,0.3)"}}>
-              {!tr.coverUrl&&"♪"}
+            <span style={{fontSize:14,fontWeight:700,color:i<3?C.primary:t.tx3,width:26,flexShrink:0,textAlign:"right"}}>{i+1}</span>
+            <div style={{width:48,height:48,borderRadius:10,flexShrink:0,overflow:"hidden",background:tr.coverUrl?"#111":bg(i%8)}}>
+              {tr.coverUrl?<img src={tr.coverUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+              :<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"rgba(255,255,255,0.3)"}}>♪</div>}
             </div>
             <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:14,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx}}>{tr.t||tr.name||""}</div>
-              <div style={{fontSize:12,color:t.tx2,marginTop:2}}>{tr.ar||""}</div>
+              <div style={{fontSize:14,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",color:t.tx,textAlign:"left"}}>{tr.t||""}</div>
+              <div style={{fontSize:12,color:t.tx2,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textAlign:"left"}}>{tr.ar||""}</div>
             </div>
           </div>
         ))}
@@ -1976,7 +2042,7 @@ export default function App(){
             <div style={{paddingBottom:76,animation:"fadeUp 0.2s ease",minHeight:"100vh"}}>
               {nav==="home"&&<HomeScreen t={t} dark={dark} setDark={setDark} onTrack={goTrack} onAlbum={goAlbum} onSub={()=>setPage("sub")} records={records} onNotif={()=>setShowNotif(!showNotif)} hasNotif={hasNotif} onSeeAll={goSeeAll}/>}
               {nav==="feed"&&<FeedScreen t={t} onTrack={goTrack} onUser={goUser} onMore={tr=>{setSelTrack(tr);setModal("more");}} feedItems={feedItems}/>}
-              {nav==="search"&&<SearchScreen t={t} onTrack={goTrack} records={records} onSeeAll={goSeeAll} onGenre={goGenre}/>}
+              {nav==="search"&&<SearchScreen t={t} onTrack={goTrack} onAlbum={goAlbum} records={records} onSeeAll={goSeeAll} onGenre={goGenre}/>}
               {nav==="archive"&&<ArchiveScreen t={t} onTrack={goTrack} records={records} lists={lists} trackLists={trackLists} onCreateList={handleCreateList}/>}
               {nav==="profile"&&<MyProfileScreen t={t} dark={dark} setDark={setDark} onSettings={()=>setPage("settings")} onSub={()=>setPage("sub")} records={records} lists={lists} onTrack={goTrack} onReport={()=>setPage("report")} profile={profile}/>}
             </div>
@@ -1984,7 +2050,7 @@ export default function App(){
             {showNotif&&<NotifPanel t={t} onClose={()=>setShowNotif(false)}/>}
           </>
         )}
-        {page==="track"&&<TrackScreen t={t} track={selTrack} onBack={()=>setPage("app")} onRecord={tr=>{setSelTrack(tr);setModal("record");}} onListModal={tr=>{setSelTrack(tr);setModal("list");}} onMore={tr=>{setSelTrack(tr);setModal("more");}} records={records} trackLists={trackLists} lists={lists}/>}
+        {page==="track"&&<TrackScreen t={t} track={selTrack} onBack={()=>setPage("app")} onRecord={tr=>{setSelTrack(tr);setModal("record");}} onListModal={tr=>{setSelTrack(tr);setModal("list");}} onMore={tr=>{setSelTrack(tr);setModal("more");}} onAlbum={goAlbum} records={records} trackLists={trackLists} lists={lists}/>}
         {page==="album"&&<AlbumScreen t={t} album={selAlbum} onBack={()=>setPage("app")} onTrack={goTrack} records={records}/>}
         {page==="user"&&<UserProfileScreen t={t} uid={viewUser.uid} username={viewUser.username} onBack={()=>setPage("app")}/>}
         {page==="settings"&&<SettingsScreen t={t} dark={dark} setDark={setDark} onBack={()=>setPage("app")} onSub={()=>setPage("sub")} onLanding={()=>setPage("landing")} onLogout={handleLogout} profile={profile} onEditProfile={()=>setPage("editProfile")}/>}
