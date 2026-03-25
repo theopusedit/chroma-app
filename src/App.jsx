@@ -524,12 +524,12 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
   const chartLabels={"us":"🌍 글로벌","kr":"🇰🇷 한국","jp":"🇯🇵 일본"};
 
   const eraQueries={
-    "70s":"classic rock 1970s led zeppelin fleetwood mac",
-    "80s":"80s pop michael jackson madonna prince",
-    "90s":"90s pop nirvana spice girls backstreet boys",
-    "00s":"2000s pop beyonce eminem linkin park",
-    "10s":"2010s pop adele ed sheeran bruno mars",
-    "20s":"2020s billie eilish olivia rodrigo dua lipa",
+    "70s":"led zeppelin fleetwood mac",
+    "80s":"michael jackson madonna",
+    "90s":"nirvana backstreet boys",
+    "00s":"beyonce eminem",
+    "10s":"adele ed sheeran",
+    "20s":"billie eilish olivia rodrigo",
   };
 
   useEffect(()=>{
@@ -542,14 +542,9 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
     }).catch(()=>setLoading(false));
 
     // 최신 앨범 (Spotify) - 독립적으로 로드
-    getNewReleases(8,"KR").then(releases=>{
-      if(releases.length>0){ setNewAlbums(releases); return; }
-      return getNewReleases(8,"US").then(r=>{ if(r.length>0) setNewAlbums(r); });
-    }).catch(()=>{
-      searchMusic("new release 2025","US").then(d=>{
-        if(d.albums.length>0) setNewAlbums(d.albums.slice(0,8));
-      }).catch(()=>{});
-    });
+    getNewReleases(8,"US").then(releases=>{
+      if(releases.length>0) setNewAlbums(releases);
+    }).catch(()=>{});
   },[]);
 
   // 차트 탭 변경시
@@ -1849,16 +1844,16 @@ function ListModal({t,track,lists,trackLists,onClose,onSave}){
 // ── 장르 상세 페이지 (Apple Music 스타일) ─────────────────────
 // ── 장르 상세 (홈처럼 구성: 배너 + 차트 + 추천 아티스트) ────
 const GENRE_SEARCH = {
-  kpop:    { q:"kpop aespa newjeans ive stayc",      market:"KR" },
-  jpop:    { q:"yoasobi official hige king gnu",     market:"JP" },
-  pop:     { q:"pop hits taylor swift ed sheeran",   market:"US" },
-  indie:   { q:"indie pop phoebe bridgers sufjan",   market:"US" },
-  hiphop:  { q:"hip hop rap drake kendrick lamar",   market:"US" },
-  rnb:     { q:"rnb soul sza beyonce frank ocean",   market:"US" },
-  jazz:    { q:"jazz miles davis john coltrane",     market:"US" },
-  dance:   { q:"dance electronic edm calvin harris", market:"US" },
-  ost:     { q:"movie soundtrack hans zimmer ennio", market:"US" },
-  classic: { q:"classical beethoven mozart chopin",  market:"US" },
+  kpop:    { q:"aespa newjeans ive",          market:"US" },
+  jpop:    { q:"yoasobi ado king gnu",         market:"US" },
+  pop:     { q:"taylor swift dua lipa",        market:"US" },
+  indie:   { q:"phoebe bridgers arctic monkeys",market:"US" },
+  hiphop:  { q:"drake kendrick lamar",         market:"US" },
+  rnb:     { q:"sza frank ocean daniel caesar", market:"US" },
+  jazz:    { q:"miles davis john coltrane",    market:"US" },
+  dance:   { q:"calvin harris david guetta",  market:"US" },
+  ost:     { q:"hans zimmer john williams",   market:"US" },
+  classic: { q:"beethoven mozart chopin",      market:"US" },
 };
 
 function GenreScreen({t,genreName,genreKey,onBack,onTrack,onArtist}){
