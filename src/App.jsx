@@ -524,30 +524,43 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
   const chartLabels={"global":"🌍 전체","kr":"🇰🇷 한국","pop":"팝","indie":"인디"};
 
   useEffect(()=>{
+    const currentYear=new Date().getFullYear();
     Promise.all([
-      getTopChart(10,"us"),
+      getTopChart(10,"kr"),   // 한국 차트를 기본으로
       getNewReleases(8,"us"),
     ]).then(([top,releases])=>{
       setTrending(top);
-      // 최신 앨범: RSS 결과가 있으면 사용, 없으면 검색으로 fallback
-      if(releases.length>0){
-        setNewAlbums(releases);
-      } else {
-        searchMusic("new album release","US").then(d=>setNewAlbums(d.albums.slice(0,8))).catch(()=>{});
-      }
       setChartTracks(top.slice(0,8));
       if(top[0]) setTodayPick(top[0]);
+      // 최신 앨범: RSS + 연도 필터로 진짜 최신만
+      const recentAlbums=releases.filter(a=>!a.yr||a.yr>=currentYear-1);
+      if(recentAlbums.length>=4){
+        setNewAlbums(recentAlbums);
+      } else {
+        // fallback: 최신 앨범 검색
+        Promise.all([
+          searchMusic(`${currentYear} new album`,"KR"),
+          searchMusic(`${currentYear} album`,"US"),
+        ]).then(([kr,us])=>{
+          const seen=new Set();
+          const merged=[];
+          [...kr.albums,...us.albums].forEach(a=>{
+            if(!seen.has(a.t)){seen.add(a.t);merged.push(a);}
+          });
+          setNewAlbums(merged.slice(0,10));
+        }).catch(()=>{});
+      }
       setLoading(false);
     }).catch(()=>{
-      // 전체 실패시 iTunes fallback
+      // 전체 실패시 fallback
       Promise.all([
-        searchMusic("top hits popular","US"),
-        searchMusic("new album","US"),
-      ]).then(([tr,al])=>{
-        setTrending(tr.tracks.slice(0,10));
+        getTopChart(10,"us"),
+        searchMusic(`${new Date().getFullYear()} new album`,"US"),
+      ]).then(([top,al])=>{
+        setTrending(top);
         setNewAlbums(al.albums.slice(0,8));
-        setChartTracks(tr.tracks.slice(0,8));
-        if(tr.tracks[0]) setTodayPick(tr.tracks[0]);
+        setChartTracks(top.slice(0,8));
+        if(top[0]) setTodayPick(top[0]);
         setLoading(false);
       }).catch(()=>setLoading(false));
     });
@@ -565,9 +578,9 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
         searchMusic("kpop","KR").then(d=>setChartTracks(d.tracks.slice(0,8)))
       );
     } else if(chart==="pop"){
-      searchMusic("pop hits taylor swift ed sheeran billie eilish","US").then(d=>setChartTracks(d.tracks.slice(0,8))).catch(()=>{});
+      searchMusic("pop","US").then(d=>setChartTracks(d.tracks.slice(0,8))).catch(()=>{});
     } else if(chart==="indie"){
-      searchMusic("indie folk alternative phoebe bridgers","US").then(d=>setChartTracks(d.tracks.slice(0,8))).catch(()=>{});
+      searchMusic("indie","US").then(d=>setChartTracks(d.tracks.slice(0,8))).catch(()=>{});
     }
   },[chart]);
 
@@ -772,22 +785,24 @@ function SearchScreen({t,onTrack,onAlbum,records,onSeeAll,onGenre}){
   const [genreCovers,setGenreCovers]=useState({});
 
   const genres=[
-    {n:"K-Pop",c:"#2d1b2d",q:"kpop aespa newjeans ive",country:"KR"},
-    {n:"J-Pop",c:"#1a1a3a",q:"jpop yoasobi official hige",country:"JP"},
-    {n:"인디",c:"#0a2e1b",q:"indie folk alternative",country:"US"},
-    {n:"팝",c:"#2d1418",q:"pop hits taylor swift",country:"US"},
-    {n:"클래식",c:"#2a1a0a",q:"classical beethoven mozart",country:"US"},
-    {n:"OST",c:"#0a2d3d",q:"movie soundtrack ost hans zimmer",country:"US"},
-    {n:"힙합",c:"#1a2a0a",q:"hip hop rap drake kendrick",country:"US"},
-    {n:"R&B",c:"#2a1a18",q:"rnb soul sza beyonce",country:"US"},
-    {n:"재즈",c:"#0e1b4a",q:"jazz miles davis coltrane",country:"US"},
-    {n:"댄스",c:"#2a1a3a",q:"dance electronic edm calvin harris",country:"US"},
+    {n:"K-Pop",c:"#2d1b2d",q:"K-Pop",country:"KR"},
+    {n:"J-Pop",c:"#1a1a3a",q:"J-Pop",country:"JP"},
+    {n:"인디",c:"#0a2e1b",q:"indie",country:"US"},
+    {n:"팝",c:"#2d1418",q:"pop",country:"US"},
+    {n:"클래식",c:"#2a1a0a",q:"classical",country:"US"},
+    {n:"OST",c:"#0a2d3d",q:"soundtrack",country:"US"},
+    {n:"힙합",c:"#1a2a0a",q:"hip-hop",country:"US"},
+    {n:"R&B",c:"#2a1a18",q:"R&B",country:"US"},
+    {n:"재즈",c:"#0e1b4a",q:"jazz",country:"US"},
+    {n:"댄스",c:"#2a1a3a",q:"dance",country:"US"},
   ];
 
   useEffect(()=>{
-    // 지금 인기 = 글로벌 RSS
-    getTopChart(10,"us").then(d=>setPopularTracks(d)).catch(()=>
-      searchMusic("top hits popular","US").then(d=>setPopularTracks(d.tracks.slice(0,10))).catch(()=>{})
+    // 지금 인기 = 한국 차트 기본
+    getKrChart(10).then(d=>setPopularTracks(d)).catch(()=>
+      getTopChart(10,"kr").then(d=>setPopularTracks(d)).catch(()=>
+        searchMusic("kpop hits","KR").then(d=>setPopularTracks(d.tracks.slice(0,10))).catch(()=>{})
+      )
     );
     // 장르별 썸네일 로드
     genres.forEach(g=>{
@@ -1413,8 +1428,8 @@ function MyProfileScreen({t,dark,setDark,onSettings,onSub,records,lists,onTrack,
           <div style={{display:"flex",gap:14,alignItems:"center"}}>
             <div style={{width:68,height:68,borderRadius:"50%",background:`linear-gradient(145deg,${GR[1][0]},${GR[6][1]})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,border:`3px solid ${C.primary}`,flexShrink:0}}>{avatarIcon}</div>
             <div style={{minWidth:0}}>
-              <div style={{fontSize:19,fontWeight:800,letterSpacing:-.3,color:t.tx}}>{profile?.display_name||profile?.username||"내 프로필"}</div>
-              {(profile?.bio)&&<div style={{fontSize:12,color:t.tx2,marginTop:3,lineHeight:1.5}}>{profile.bio}</div>}
+              <div style={{fontSize:19,fontWeight:800,letterSpacing:-.3,color:t.tx}}>{(profile?.display_name||profile?.username||"내 프로필").trim()}</div>
+              {(profile?.bio?.trim())&&<div style={{fontSize:12,color:t.tx2,marginTop:3,lineHeight:1.5}}>{profile.bio.trim()}</div>}
             </div>
           </div>
           <div style={{display:"flex",gap:8,paddingTop:4}}>
@@ -1869,11 +1884,24 @@ function GenreScreen({t,genreName,genreQuery,genreCountry,onBack,onTrack}){
   const [coverUrl,setCoverUrl]=useState("");
 
   useEffect(()=>{
-    searchMusic(genreQuery, genreCountry||"US").then(d=>{
-      const loaded=d.tracks.slice(0,50);
-      setTracks(loaded);
-      // 첫 번째 로드된 곡의 커버를 헤더로 사용
-      const firstWithCover=loaded.find(tr=>tr.coverUrl);
+    setLoading(true);
+    setTracks([]);
+    // 여러 페이지로 나눠서 검색 → 다양한 아티스트 확보
+    Promise.all([
+      searchMusic(genreQuery, genreCountry||"US"),
+      searchMusic(genreQuery+" popular", genreCountry||"US"),
+      searchMusic(genreQuery+" hits", genreCountry||"US"),
+    ]).then(results=>{
+      const seen=new Set();
+      const merged=[];
+      results.forEach(d=>{
+        (d.tracks||[]).forEach(tr=>{
+          const key=`${tr.t}-${tr.ar}`;
+          if(!seen.has(key)){seen.add(key);merged.push(tr);}
+        });
+      });
+      setTracks(merged.slice(0,60));
+      const firstWithCover=merged.find(tr=>tr.coverUrl);
       if(firstWithCover) setCoverUrl(firstWithCover.coverUrl);
       setLoading(false);
     }).catch(()=>setLoading(false));
@@ -2096,19 +2124,23 @@ export default function App(){
       `}</style>
       <div className="app-wrap" style={{background:t.bg,color:t.tx,fontFamily:CONFIG.fonts.family,transition:"background 0.25s,color 0.25s"}}>
         {genre&&(
-          <div style={{position:"fixed",inset:0,zIndex:500,background:t.bg,overflowY:"auto",maxWidth:480,margin:"0 auto",display:"flex",flexDirection:"column"}}>
+          <div style={{position:"fixed",inset:0,zIndex:500,background:t.bg,maxWidth:480,margin:"0 auto",display:"flex",flexDirection:"column",overflow:"hidden"}}>
             <div style={{flex:1,overflowY:"auto",paddingBottom:76}}>
               <GenreScreen t={t} genreName={genre.name} genreQuery={genre.query} genreCountry={genre.country} onBack={()=>setGenre(null)} onTrack={tr=>{setGenre(null);goTrack(tr);}}/>
             </div>
-            <BottomNav t={t} nav={nav} setNav={v=>{setGenre(null);setNav(v);setPage("app");}}/>
+            <div style={{position:"absolute",bottom:0,left:0,right:0,zIndex:600}}>
+              <BottomNav t={t} nav={nav} setNav={v=>{setGenre(null);setNav(v);setPage("app");}}/>
+            </div>
           </div>
         )}
         {seeAll&&(
-          <div style={{position:"fixed",inset:0,zIndex:500,background:t.bg,maxWidth:480,margin:"0 auto",display:"flex",flexDirection:"column"}}>
+          <div style={{position:"fixed",inset:0,zIndex:500,background:t.bg,maxWidth:480,margin:"0 auto",display:"flex",flexDirection:"column",overflow:"hidden"}}>
             <div style={{flex:1,overflowY:"auto",paddingBottom:76}}>
               <SeeAllScreen t={t} title={seeAll.title} items={seeAll.items} query={seeAll.query} onBack={()=>setSeeAll(null)} onTrack={tr=>{setSeeAll(null);goTrack(tr);}}/>
             </div>
-            <BottomNav t={t} nav={nav} setNav={v=>{setSeeAll(null);setNav(v);setPage("app");}}/>
+            <div style={{position:"absolute",bottom:0,left:0,right:0,zIndex:600}}>
+              <BottomNav t={t} nav={nav} setNav={v=>{setSeeAll(null);setNav(v);setPage("app");}}/>
+            </div>
           </div>
         )}        {page==="landing"&&<LandingScreen t={t} dark={dark} setDark={setDark} onLogin={()=>setPage("login")} onSignup={()=>setPage("login")}/>}
         {page==="login"&&<LoginScreen t={t} dark={dark} setDark={setDark} onLogin={handleLogin} onBack={()=>setPage("landing")}/>}
