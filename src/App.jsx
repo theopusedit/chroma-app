@@ -1,10 +1,9 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { CONFIG, THEME } from "./config";
 import supabase, {
-  signUp, signIn, signOut, getUser, getProfile, updateProfile,
-  getFollowCounts, saveRecord, deleteRecord, getMyRecords,
-  getTrackRecord, getPublicFeed, toggleLike,
-  getMyLists, createList, saveListAssignment, getTrackLists,
+  signUp, signIn, signOut, getUser, getProfile,
+  saveRecord, getMyRecords, getPublicFeed,
+  getMyLists, createList, saveListAssignment,
 } from './supabase.js';
 import { searchMusic, getAlbumTracks, getKpopChart, getStreamingLinks } from './music.js';
 
@@ -40,18 +39,9 @@ const ALBUMS = [
   {id:6,t:"Hotel California",ar:"Eagles",yr:1977,g:7,rec:5432,rt:4.8,altype:"정규 5집",genre:"Classic Rock",tracks:9,dur:"43:28",label:"Asylum Records"},
 ];
 
-const INIT_LISTS = [
-  {id:1,name:"새벽 4시에 듣는 곡들",count:23,gs:[0,1,2,3]},
-  {id:2,name:"2023년 여름 플리",count:18,gs:[4,5,6,7]},
-  {id:3,name:"운전할 때",count:31,gs:[1,3,5,7]},
-  {id:4,name:"언젠가 꼭 들을 것들",count:47,gs:[0,2,4,6]},
-];
-
-const INIT_RECORDS = {
-  1:{rating:5,memo:"트와일라잇 배구씬에서 처음 들었는데 그 이후로 인생 곡이 됨. 기타 리프는 진짜 미침",date:"2019년 여름",isPublic:true}
-};
-
-const INIT_TLISTS = {1:[1,3],3:[2]};
+const INIT_LISTS = [];
+const INIT_RECORDS = {};
+const INIT_TLISTS = {};
 
 const NOTIFS = [
   {id:1,type:"like",user:"park.music",msg:"님이 회원님의 리뷰에 좋아요를 눌렀어요",sub:"Supermassive Black Hole",time:"5분 전",read:false},
@@ -102,27 +92,28 @@ function LoginScreen({t, dark, setDark, onLogin, onBack}) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const isValidEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+
   const handleSubmit = async () => {
     setError("");
     if (!email) { setError("이메일을 입력해주세요"); return; }
+    if (!isValidEmail(email)) { setError("올바른 이메일 형식으로 입력해주세요 (예: hello@gmail.com)"); return; }
     if (mode !== "forgot" && !pw) { setError("비밀번호를 입력해주세요"); return; }
     if (mode === "signup" && !name) { setError("닉네임을 입력해주세요"); return; }
+    if (mode === "signup" && name.length < 2) { setError("닉네임은 2자 이상 입력해주세요"); return; }
     if (mode === "signup" && pw.length < 6) { setError("비밀번호는 6자 이상이어야 해요"); return; }
-
     setLoading(true);
     try {
-      if (mode === "signup") {
-        await signUp(email, pw, name);
-        onLogin();
-      } else {
-        await signIn(email, pw);
-        onLogin();
-      }
+      if (mode === "forgot") { setMode("login"); alert("재설정 링크를 이메일로 보냈어요!"); setLoading(false); return; }
+      if (mode === "signup") { await signUp(email, pw, name); onLogin(); }
+      else { await signIn(email, pw); onLogin(); }
     } catch(e) {
-      const msg = e.message || "";
-      if (msg.includes("Invalid login")) setError("이메일 또는 비밀번호가 틀렸어요");
-      else if (msg.includes("already registered")) setError("이미 가입된 이메일이에요");
-      else setError("오류가 발생했어요. 다시 시도해주세요");
+      const msg = (e.message || "").toLowerCase();
+      if (msg.includes("invalid login") || msg.includes("invalid credentials")) setError("이메일 또는 비밀번호가 틀렸어요");
+      else if (msg.includes("already registered") || msg.includes("already exists")) setError("이미 가입된 이메일이에요. 로그인을 시도해보세요");
+      else if (msg.includes("weak password")) setError("비밀번호는 6자 이상, 영문+숫자 조합을 추천해요");
+      else if (msg.includes("network") || msg.includes("fetch")) setError("네트워크 오류예요. 인터넷 연결을 확인해주세요");
+      else setError("오류: " + (e.message || "다시 시도해주세요"));
     }
     setLoading(false);
   };
@@ -583,10 +574,10 @@ function HomeScreen({t,dark,setDark,onTrack,onAlbum,onSub,records,onNotif,hasNot
 }
 
 // ── FEED ──────────────────────────────────────────────────────
-function FeedScreen({t,onTrack,onUser,onMore,feedItems,currentUser}){
+function FeedScreen({t,onTrack,onUser,onMore,feedItems}){
   const [liked,setLiked]=useState({});
   const [tab,setTab]=useState("hot");
-  const items = feedItems && feedItems.length > 0 ? feedItems : FEED_ITEMS;
+  const items=feedItems&&feedItems.length>0?feedItems:[];
   const sorted=[...items].sort((a,b)=>tab==="hot"?b.likes-a.likes:0);
   return(
     <div>
@@ -602,7 +593,13 @@ function FeedScreen({t,onTrack,onUser,onMore,feedItems,currentUser}){
             onClick={()=>setTab(id)}>{label}</div>
         ))}
       </div>
-      {[...items].sort((a,b)=>tab==="hot"?b.likes-a.likes:0).map((r,i)=>(
+      {sorted.length===0&&(
+        <div style={{padding:"60px 20px",textAlign:"center",color:t.tx2}}>
+          아직 피드가 없어요<br/>
+          <span style={{fontSize:12,color:t.tx3,display:"block",marginTop:6}}>곡을 기록하고 공개하면 여기 나타나요</span>
+        </div>
+      )}
+      {sorted.map((r,i)=>(
         <div key={r.id} style={{padding:"18px 20px",borderBottom:`1px solid ${t.bd}`}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,cursor:"pointer"}} onClick={()=>onUser(r.uid,r.user)}>
             <div style={{width:34,height:34,borderRadius:"50%",background:bg(i),display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,color:"rgba(255,255,255,0.8)",fontWeight:700,flexShrink:0}}>
@@ -1026,12 +1023,11 @@ function AnnualReport({t,onBack}){
 function MyProfileScreen({t,dark,setDark,onSettings,onSub,records,lists,onTrack,onReport,profile}){
   const [tab,setTab]=useState("records");
   const rTracks=Object.entries(records).map(([tid,rec])=>({
-    id:tid, t:rec.track_title||"알 수 없는 곡", ar:rec.artist||"",
-    coverUrl:rec.coverUrl||"", g:0, rt:rec.rating||0,
+    id:tid,t:rec.track_title||"알 수 없는 곡",ar:rec.artist||"",
+    coverUrl:rec.coverUrl||"",g:0,rt:rec.rating||0,
   }));
-  const displayName = profile?.display_name || profile?.username || "내 프로필";
-  const username = profile?.username || "username";
-  const bio = profile?.bio || "음악을 사랑하는 사람";
+  const displayName=profile?.display_name||profile?.username||"내 프로필";
+  const bio=profile?.bio||"음악을 사랑하는 사람";
   return(
     <div>
       <div style={{padding:"52px 20px 0",borderBottom:`1px solid ${t.bd}`}}>
@@ -1155,15 +1151,64 @@ function UserProfileScreen({t,uid,username,onBack}){
   );
 }
 
+// ── 프로필 수정 모달 ──────────────────────────────────────────
+function EditProfileModal({t,profile,onClose,onSave}){
+  const [displayName,setDisplayName]=useState(profile?.display_name||"");
+  const [bio,setBio]=useState(profile?.bio||"");
+  const [loading,setLoading]=useState(false);
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
+      <div style={{background:t.sf,borderRadius:"22px 22px 0 0",padding:"0 20px 44px",width:"100%",maxWidth:480}} onClick={e=>e.stopPropagation()}>
+        <div style={{width:36,height:4,background:t.bd,borderRadius:2,margin:"12px auto 20px"}}/>
+        <div style={{fontSize:18,fontWeight:800,color:t.tx,marginBottom:20}}>프로필 수정</div>
+        <div style={{fontSize:12,color:t.tx2,marginBottom:6}}>닉네임</div>
+        <input style={inputStyle(t)} value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="닉네임"/>
+        <div style={{fontSize:12,color:t.tx2,margin:"14px 0 6px"}}>한 줄 소개</div>
+        <textarea style={{...inputStyle(t),resize:"none",height:80,lineHeight:1.5}} value={bio} onChange={e=>setBio(e.target.value)} placeholder="음악을 사랑하는 사람"/>
+        <div style={{background:C.primary,color:"#fff",padding:"15px",borderRadius:14,textAlign:"center",fontSize:15,fontWeight:700,cursor:"pointer",marginTop:20,opacity:loading?0.6:1}}
+          onClick={async()=>{setLoading(true);await onSave({display_name:displayName,bio});setLoading(false);}}>
+          {loading?"저장 중...":"저장하기"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── SETTINGS ──────────────────────────────────────────────────
-function SettingsScreen({t,dark,setDark,onBack,onSub,onLanding,onLogout,profile}){
-  const username = profile?.username || "내 계정";
+function SettingsScreen({t,dark,setDark,onBack,onSub,onLanding,onLogout,profile,onEditProfile}){
+  const sections=[
+    {title:"계정",items:[
+      {i:"◎",l:"프로필 편집",action:onEditProfile},
+      {i:"🔒",l:"비밀번호 변경",action:()=>alert("이메일로 비밀번호 재설정 링크를 보내드릴게요 (준비중)")},
+      {i:"📧",l:"이메일 변경",action:()=>alert("준비 중이에요")},
+    ]},
+    {title:"프라이버시",items:[
+      {i:"🔑",l:"계정 공개/비공개",action:()=>alert("준비 중이에요")},
+      {i:"🚫",l:"차단 목록",action:()=>alert("차단한 사용자가 없어요")},
+    ]},
+    {title:"알림",items:[
+      {i:"🔔",l:"알림 설정",action:()=>alert("준비 중이에요")},
+    ]},
+    {title:"데이터",items:[
+      {i:"⟳",l:"데이터 내보내기",action:()=>alert("준비 중이에요")},
+      {i:"🗑",l:"기록 전체 삭제",danger:true,action:()=>{if(confirm("정말 모든 기록을 삭제할까요?"))alert("준비 중이에요")}},
+    ]},
+  ];
   return(
     <div style={{minHeight:"100vh",background:t.bg,paddingBottom:40}}>
       <div style={{padding:"52px 20px 20px",display:"flex",alignItems:"center",gap:14,borderBottom:`1px solid ${t.bd}`}}>
         <IconBtn icon="‹" t={t} onClick={onBack}/>
         <div style={{fontSize:24,fontWeight:800,letterSpacing:-.5,color:t.tx}}>설정</div>
       </div>
+      {profile&&(
+        <div style={{display:"flex",gap:14,alignItems:"center",padding:"16px 20px",borderBottom:`1px solid ${t.bd}`,cursor:"pointer"}} onClick={onEditProfile}>
+          <div style={{width:48,height:48,borderRadius:"50%",background:bg(1),display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>🎵</div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:15,fontWeight:700,color:t.tx}}>{profile.display_name||profile.username}</div>
+            <div style={{fontSize:12,color:t.tx2,marginTop:2}}>프로필 편집 →</div>
+          </div>
+        </div>
+      )}
       <div style={{margin:"16px 20px",background:dark?"#0D0D1A":"#F3EEFF",border:`1px solid ${C.primary}30`,borderRadius:16,padding:"18px",cursor:"pointer"}} onClick={onSub}>
         <div style={{fontSize:11,letterSpacing:.15,textTransform:"uppercase",color:C.primary,fontWeight:700,marginBottom:4}}>✦ Pro 멤버십</div>
         <div style={{fontSize:13,fontWeight:600,color:t.tx}}>{CONFIG.pricing.monthly} · 무제한 기록 · 광고 없음 →</div>
@@ -1175,12 +1220,12 @@ function SettingsScreen({t,dark,setDark,onBack,onSub,onLanding,onLogout,profile}
         </div>
         <Toggle on={dark} onToggle={()=>setDark(!dark)} t={t}/>
       </div>
-      {[{title:"계정",items:[{i:"◎",l:"프로필 편집"},{i:"🔒",l:"비밀번호 변경"},{i:"📧",l:"이메일 변경"}]},{title:"프라이버시",items:[{i:"🔑",l:"계정 공개/비공개"},{i:"🚫",l:"차단 목록"}]},{title:"알림",items:[{i:"🔔",l:"알림 설정"}]},{title:"데이터",items:[{i:"⟳",l:"데이터 내보내기"},{i:"🗑",l:"기록 전체 삭제",danger:true}]}].map(sec=>(
+      {sections.map(sec=>(
         <div key={sec.title} style={{marginTop:24}}>
           <div style={{fontSize:12,letterSpacing:.1,textTransform:"uppercase",color:t.tx3,padding:"0 20px",marginBottom:4,fontWeight:600}}>{sec.title}</div>
           <div style={{background:t.sf,borderRadius:16,margin:"0 20px",overflow:"hidden",border:`1px solid ${t.bd}`}}>
             {sec.items.map((item,i)=>(
-              <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",borderBottom:i<sec.items.length-1?`1px solid ${t.bd}`:"none",cursor:"pointer"}}>
+              <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",borderBottom:i<sec.items.length-1?`1px solid ${t.bd}`:"none",cursor:"pointer"}} onClick={item.action}>
                 <div style={{width:30,height:30,borderRadius:8,background:item.danger?`${C.red}15`:t.sf2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:item.danger?C.red:t.tx,flexShrink:0}}>{item.i}</div>
                 <span style={{fontSize:14,color:item.danger?C.red:t.tx,flex:1,fontWeight:400}}>{item.l}</span>
                 {!item.danger&&<span style={{color:t.tx3,fontSize:16}}>›</span>}
@@ -1189,7 +1234,7 @@ function SettingsScreen({t,dark,setDark,onBack,onSub,onLanding,onLogout,profile}
           </div>
         </div>
       ))}
-      <div style={{margin:"28px 20px 0",background:t.sf,border:`1px solid ${t.bd}`,color:t.tx2,padding:"13px",borderRadius:12,textAlign:"center",fontSize:14,cursor:"pointer"}} onClick={onLogout}>로그아웃</div>
+      <div style={{margin:"28px 20px 0",background:t.sf,border:`1px solid ${t.bd}`,color:C.red,padding:"13px",borderRadius:12,textAlign:"center",fontSize:14,cursor:"pointer",fontWeight:600}} onClick={onLogout}>로그아웃</div>
       <div style={{padding:"16px 20px",textAlign:"center",cursor:"pointer"}} onClick={onLanding}>
         <span style={{fontSize:13,color:C.primary}}>{CONFIG.service.name} 서비스 소개 페이지 →</span>
       </div>
@@ -1379,35 +1424,25 @@ export default function App(){
   const [selAlbum,setSelAlbum]=useState(null);
   const [viewUser,setViewUser]=useState({uid:"",username:""});
   const [showNotif,setShowNotif]=useState(false);
-
-  // ── 실제 유저/데이터 상태 ──
   const [currentUser,setCurrentUser]=useState(null);
   const [profile,setProfile]=useState(null);
-  const [records,setRecords]=useState({});       // { trackId: {rating,memo,...} }
-  const [lists,setLists]=useState(INIT_LISTS);
-  const [trackLists,setTrackLists]=useState(INIT_TLISTS);
-  const [feedItems,setFeedItems]=useState(FEED_ITEMS);
-
+  const [records,setRecords]=useState({});
+  const [lists,setLists]=useState([]);
+  const [trackLists,setTrackLists]=useState({});
+  const [feedItems,setFeedItems]=useState([]);
+  const [editProfileModal,setEditProfileModal]=useState(false);
   const t=THEME(dark);
   const hasNotif=NOTIFS.some(n=>!n.read);
 
-  // 앱 시작 시 로그인 상태 확인
   useEffect(()=>{
     getUser().then(user=>{
-      if(user){
-        setCurrentUser(user);
-        setPage("app");
-        loadUserData(user.id);
-      }
+      if(user){ setCurrentUser(user); setPage("app"); loadUserData(user.id); }
     });
-    // 공개 피드 불러오기
     getPublicFeed().then(feed=>{
       if(feed.length>0) setFeedItems(feed.map(r=>({
-        id:r.id, user:r.profiles?.username||"익명",
-        uid:r.user_id, track:r.track_title, artist:r.artist,
-        g:Math.floor(Math.random()*8), rating:r.rating,
-        memo:r.memo, likes:0, time:"방금 전",
-        coverUrl:r.cover_url,
+        id:r.id, user:r.profiles?.username||"익명", uid:r.user_id,
+        track:r.track_title, artist:r.artist, g:Math.floor(Math.random()*8),
+        rating:r.rating, memo:r.memo, likes:0, time:"방금 전", coverUrl:r.cover_url,
       })));
     }).catch(()=>{});
   },[]);
@@ -1420,76 +1455,49 @@ export default function App(){
         getMyLists(userId),
       ]);
       if(prof) setProfile(prof);
-      // records를 { trackId: data } 형태로 변환
-      const recMap = {};
+      const recMap={};
       myRecords.forEach(r=>{
-        recMap[r.track_id]={
-          rating:r.rating, memo:r.memo,
-          date:r.listened_date, isPublic:r.is_public,
-          recordId:r.id, coverUrl:r.cover_url,
-        };
+        recMap[r.track_id]={rating:r.rating,memo:r.memo,date:r.listened_date,isPublic:r.is_public,recordId:r.id,coverUrl:r.cover_url,track_title:r.track_title,artist:r.artist};
       });
       setRecords(recMap);
-      if(myLists.length>0) setLists(myLists);
+      if(myLists.length>=0) setLists(myLists);
     } catch(e){ console.error(e); }
   };
 
-  const goApp=()=>{
-    setPage("app");setNav("home");
-    if(currentUser) loadUserData(currentUser.id);
-  };
+  const goApp=()=>{setPage("app");setNav("home");if(currentUser)loadUserData(currentUser.id);};
   const goTrack=tr=>{setSelTrack(tr);setPage("track");};
   const goAlbum=al=>{setSelAlbum(al);setPage("album");};
   const goUser=(uid,username)=>{setViewUser({uid,username});setPage("user");};
   const showComingSoon=(title,message)=>setComingSoon({title,message});
 
-  const handleLogin = async () => {
-    const user = await getUser();
-    if(user){
-      setCurrentUser(user);
-      await loadUserData(user.id);
-    }
+  const handleLogin=async()=>{
+    const user=await getUser();
+    if(user){setCurrentUser(user);await loadUserData(user.id);}
     goApp();
   };
-
-  const handleSaveRecord = async (data) => {
-    if(!selTrack) return;
-    const trackId = String(selTrack.id||selTrack.itunesId||'');
+  const handleSaveRecord=async(data)=>{
+    if(!selTrack)return;
+    const trackId=String(selTrack.id||selTrack.itunesId||'');
     if(currentUser){
-      try {
-        await saveRecord(currentUser.id, selTrack, data);
-        await loadUserData(currentUser.id);
-      } catch(e){ console.error(e); }
-    } else {
-      setRecords(p=>({...p,[trackId]:data}));
-    }
+      try{await saveRecord(currentUser.id,selTrack,data);await loadUserData(currentUser.id);}
+      catch(e){console.error(e);}
+    } else {setRecords(p=>({...p,[trackId]:data}));}
   };
-
-  const handleSaveList = async (trackId, listIds) => {
-    if(currentUser && selTrack){
-      try {
-        await saveListAssignment(currentUser.id, trackId, selTrack, listIds, lists);
-        await loadUserData(currentUser.id);
-      } catch(e){ console.error(e); }
+  const handleSaveList=async(trackId,listIds)=>{
+    if(currentUser&&selTrack){
+      try{await saveListAssignment(currentUser.id,trackId,selTrack,listIds,lists);await loadUserData(currentUser.id);}
+      catch(e){console.error(e);}
     }
     setTrackLists(p=>({...p,[trackId]:listIds}));
   };
-
-  const handleLogout = async () => {
-    await signOut();
-    setCurrentUser(null);
-    setProfile(null);
-    setRecords({});
-    setPage("landing");
-  };
-
-  const handleCreateList = async (name) => {
+  const handleCreateList=async(name)=>{
     if(currentUser){
-      try {
-        await createList(currentUser.id, name);
-        await loadUserData(currentUser.id);
-      } catch(e){ console.error(e); }
+      try{await createList(currentUser.id,name);await loadUserData(currentUser.id);}
+      catch(e){console.error(e);}
     }
+  };
+  const handleLogout=async()=>{
+    await signOut();setCurrentUser(null);setProfile(null);setRecords({});setLists([]);setPage("landing");
   };
 
   return(
@@ -1501,38 +1509,36 @@ export default function App(){
         ::-webkit-scrollbar{display:none;}
         input,textarea{outline:none;border:none;font-family:${CONFIG.fonts.family};}
         @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+        .app-wrap{width:100%;max-width:480px;min-height:100vh;margin:0 auto;background:${t.bg};color:${t.tx};font-family:${CONFIG.fonts.family};transition:background 0.25s,color 0.25s;position:relative;}
+        @media(min-width:768px){.app-wrap{box-shadow:0 0 60px rgba(0,0,0,0.15);}}
       `}</style>
-      <div style={{maxWidth:390,margin:"0 auto",minHeight:"100vh",background:t.bg,color:t.tx,fontFamily:CONFIG.fonts.family,transition:"background 0.25s,color 0.25s"}}>
-
+      <div className="app-wrap">
         {page==="landing"&&<LandingScreen t={t} dark={dark} setDark={setDark} onLogin={()=>setPage("login")} onSignup={()=>setPage("login")}/>}
         {page==="login"&&<LoginScreen t={t} dark={dark} setDark={setDark} onLogin={handleLogin} onBack={()=>setPage("landing")}/>}
-
         {page==="app"&&(
           <>
             <div style={{paddingBottom:76,animation:"fadeUp 0.2s ease",minHeight:"100vh"}}>
               {nav==="home"&&<HomeScreen t={t} dark={dark} setDark={setDark} onTrack={goTrack} onAlbum={goAlbum} onSub={()=>setPage("sub")} records={records} onNotif={()=>setShowNotif(!showNotif)} hasNotif={hasNotif}/>}
-              {nav==="feed"&&<FeedScreen t={t} onTrack={goTrack} onUser={goUser} onMore={tr=>{setSelTrack(tr);setModal("more");}} feedItems={feedItems} currentUser={currentUser}/>}
+              {nav==="feed"&&<FeedScreen t={t} onTrack={goTrack} onUser={goUser} onMore={tr=>{setSelTrack(tr);setModal("more");}} feedItems={feedItems}/>}
               {nav==="search"&&<SearchScreen t={t} onTrack={goTrack} records={records}/>}
-              {nav==="archive"&&<ArchiveScreen t={t} onTrack={goTrack} records={records} lists={lists} trackLists={trackLists}/>}
+              {nav==="archive"&&<ArchiveScreen t={t} onTrack={goTrack} records={records} lists={lists} trackLists={trackLists} onCreateList={handleCreateList}/>}
               {nav==="profile"&&<MyProfileScreen t={t} dark={dark} setDark={setDark} onSettings={()=>setPage("settings")} onSub={()=>setPage("sub")} records={records} lists={lists} onTrack={goTrack} onReport={()=>setPage("report")} profile={profile}/>}
             </div>
             <BottomNav t={t} nav={nav} setNav={setNav}/>
             {showNotif&&<NotifPanel t={t} onClose={()=>setShowNotif(false)}/>}
           </>
         )}
-
         {page==="track"&&<TrackScreen t={t} track={selTrack} onBack={()=>setPage("app")} onRecord={tr=>{setSelTrack(tr);setModal("record");}} onListModal={tr=>{setSelTrack(tr);setModal("list");}} onMore={tr=>{setSelTrack(tr);setModal("more");}} records={records} trackLists={trackLists} lists={lists}/>}
         {page==="album"&&<AlbumScreen t={t} album={selAlbum} onBack={()=>setPage("app")} onTrack={goTrack} records={records}/>}
         {page==="user"&&<UserProfileScreen t={t} uid={viewUser.uid} username={viewUser.username} onBack={()=>setPage("app")}/>}
-        {page==="settings"&&<SettingsScreen t={t} dark={dark} setDark={setDark} onBack={()=>setPage("app")} onSub={()=>setPage("sub")} onLanding={()=>setPage("landing")} onLogout={handleLogout} profile={profile}/>}
-        {page==="sub"&&<SubScreen t={t} dark={dark} onBack={()=>setPage("app")} onComingSoon={()=>showComingSoon("결제 기능 준비 중", CONFIG.comingSoon.payment)}/>}
+        {page==="settings"&&<SettingsScreen t={t} dark={dark} setDark={setDark} onBack={()=>setPage("app")} onSub={()=>setPage("sub")} onLanding={()=>setPage("landing")} onLogout={handleLogout} profile={profile} onEditProfile={()=>setEditProfileModal(true)}/>}
+        {page==="sub"&&<SubScreen t={t} dark={dark} onBack={()=>setPage("app")} onComingSoon={()=>showComingSoon("결제 기능 준비 중",CONFIG.comingSoon.payment)}/>}
         {page==="report"&&<AnnualReport t={t} onBack={()=>setPage("app")} records={records}/>}
-
         {modal==="record"&&<RecordModal t={t} track={selTrack} existing={selTrack?records[String(selTrack.id||selTrack.itunesId||'')]:null} onClose={()=>setModal(null)} onSave={handleSaveRecord}/>}
         {modal==="list"&&<ListModal t={t} track={selTrack} lists={lists} trackLists={trackLists} onClose={()=>setModal(null)} onSave={handleSaveList} onCreateList={handleCreateList}/>}
         {modal==="more"&&<MoreSheet t={t} track={selTrack} onClose={()=>setModal(null)}/>}
-
         {comingSoon&&<ComingSoonModal t={t} title={comingSoon.title} message={comingSoon.message} onClose={()=>setComingSoon(null)}/>}
+        {editProfileModal&&<EditProfileModal t={t} profile={profile} currentUser={currentUser} onClose={()=>setEditProfileModal(false)} onSave={async(updates)=>{if(currentUser){await supabase.from('profiles').update(updates).eq('id',currentUser.id);await loadUserData(currentUser.id);}setEditProfileModal(false);}}/>}
       </div>
     </>
   );
